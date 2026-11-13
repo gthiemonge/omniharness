@@ -7,7 +7,8 @@ exposed to the model through an in-process MCP server.
 
 Vertex AI / Bedrock are auto-detected by the SDK from environment variables
 (CLAUDE_CODE_USE_VERTEX, ANTHROPIC_VERTEX_PROJECT_ID, CLOUD_ML_REGION, ...), so
-no explicit configuration is needed here.
+no explicit configuration is needed here. A custom endpoint (gateway, proxy,
+...) comes from base_url, else ANTHROPIC_BASE_URL in the environment.
 """
 
 from typing import Any
@@ -27,15 +28,18 @@ class ClaudeProvider(Provider):
     name = "claude"
 
     def __init__(self, permission_mode: str = "acceptEdits",
-                 options: dict[str, Any] | None = None):
+                 options: dict[str, Any] | None = None, base_url: str | None = None):
         """
         Args:
             permission_mode: Claude Agent SDK permission mode.
             options: Extra ClaudeAgentOptions fields, passed through verbatim
                 (e.g. {"setting_sources": []} to ignore ~/.claude settings).
+            base_url: Custom Anthropic API endpoint. Defaults to
+                ANTHROPIC_BASE_URL, which the SDK's CLI inherits on its own.
         """
         self.permission_mode = permission_mode
         self.options = options or {}
+        self.base_url = base_url
 
     async def run(self, request: RunRequest, reporter: Reporter) -> RunResult:
         try:
@@ -76,6 +80,9 @@ class ClaudeProvider(Provider):
             option_values["mcp_servers"] = {MCP_SERVER_NAME: _mcp_server(custom, ctx)}
         if request.effort is not None:
             option_values["effort"] = request.effort
+        if self.base_url:
+            # The SDK starts its CLI with the inherited environment plus `env`.
+            option_values["env"]["ANTHROPIC_BASE_URL"] = self.base_url
         option_values.update(self.options)
         options = ClaudeAgentOptions(**option_values)
 

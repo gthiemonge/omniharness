@@ -28,6 +28,7 @@ Credentials are the same as each SDK's:
 export ANTHROPIC_API_KEY=...              # or an existing Claude Code login
 # Vertex AI: CLAUDE_CODE_USE_VERTEX=1 ANTHROPIC_VERTEX_PROJECT_ID=... CLOUD_ML_REGION=...
 export OPENAI_API_KEY=...
+export ANTHROPIC_BASE_URL=https://my-gateway/anthropic   # optional, custom endpoint
 export OPENAI_BASE_URL=https://my-gateway/v1   # optional, OpenAI-compatible endpoint
 ```
 
@@ -92,16 +93,29 @@ python examples/07_auto_model.py --rate-only
 
 ## Configuration
 
-Model resolution, first match wins. The env var names match openstack-review's.
+For each setting, an explicit argument wins over the environment, which wins
+over the default. Every environment variable the harness reads has an argument
+and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
+`ps` and in shell history. The `AGENT_*` names match openstack-review's.
 
-| Setting | Explicit | Environment | Fallback |
-|---------|----------|-------------|----------|
-| provider | `provider=` / `--provider` | `AGENT_PROVIDER` | `claude` |
-| model | `model=` / `--model` | `AGENT_MODEL` | preset's model |
-| preset | `preset=` / `--preset` | `AGENT_PRESET` | `standard` |
-| effort | `effort=` / `--effort` | `AGENT_EFFORT` | provider default |
-| OpenAI endpoint | `provider_options={"base_url": ...}` / `--base-url` | `OPENAI_BASE_URL` | api.openai.com |
-| OpenAI prices (USD / 1M tokens) | `provider_options={"price_input": ..., "price_output": ...}` | `OPENAI_PRICE_INPUT/OUTPUT` | `pricing.PRICING` table |
+| Setting | Argument | CLI | Environment | Default |
+|---------|----------|-----|-------------|---------|
+| provider | `Agent(provider=)` | `--provider` | `AGENT_PROVIDER` | `claude` |
+| model | `Agent(model=)` | `--model` | `AGENT_MODEL` | preset's model |
+| preset | `Agent(preset=)` | `--preset` | `AGENT_PRESET` | `standard` |
+| effort | `Agent(effort=)` | `--effort` | `AGENT_EFFORT` | provider default |
+| endpoint (claude) | `provider_options={"base_url": ...}` | `--base-url` | `ANTHROPIC_BASE_URL` | Anthropic API |
+| endpoint (openai) | `provider_options={"base_url": ...}` | `--base-url` | `OPENAI_BASE_URL` | api.openai.com |
+| OpenAI organization | `provider_options={"organization": ...}` | `--openai-org` | `OPENAI_ORG` | none |
+| OpenAI prices (USD / 1M tokens) | `provider_options={"price_input": ..., "price_output": ...}` | `--openai-price-input/-output` | `OPENAI_PRICE_INPUT/OUTPUT` | `pricing.PRICING` table |
+| OpenAI API key | `provider_options={"api_key": ...}` | none | `OPENAI_API_KEY` | required |
+| d1 server (`auto`) | `D1Router(url=)` | `--d1-url` | `D1_URL` | start one |
+| llama-server binary (`auto`) | `D1Router(llama_server=)` | `--llama-server` | `LLAMA_SERVER` | `PATH` |
+| d1 model file (`auto`) | `D1Router(model_path=)` | `--d1-model` | `D1_MODEL` | Hugging Face cache (`HF_HUB_CACHE` / `HF_HOME`) |
+
+The Claude SDK reads its own variables (`ANTHROPIC_API_KEY`,
+`CLAUDE_CODE_USE_VERTEX`, ...) directly. To set them for one agent, use
+`provider_options={"options": {"env": {...}}}`.
 
 Presets (`quick` / `standard` / `thorough`) live in `config.DEFAULT_PRESETS`.
 Pass your own table with `Agent(presets=...)`. Its shape is the same as

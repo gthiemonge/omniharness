@@ -151,6 +151,33 @@ async def test_claude_provider_maps_tools_and_messages(monkeypatch):
     assert result.usage.total_input_tokens == 15 and result.total_cost_usd == 0.5
 
 
+async def test_claude_base_url_reaches_the_cli_env(monkeypatch):
+    sdk = pytest.importorskip("claude_agent_sdk")
+    seen = {}
+
+    async def fake_query(prompt, options):
+        seen["env"] = options.env
+        yield sdk.ResultMessage(subtype="success", duration_ms=1, duration_api_ms=1,
+                                is_error=False, num_turns=1, session_id="s")
+
+    monkeypatch.setattr(sdk, "query", fake_query)
+    agent = Agent(provider="claude", model="m", env={"X": "1"}, reporter=Reporter(),
+                  provider_options={"base_url": "https://gw.example/anthropic"})
+    await agent.run("hi")
+    assert seen["env"] == {"X": "1", "ANTHROPIC_BASE_URL": "https://gw.example/anthropic"}
+    # Without base_url nothing is set: the CLI inherits ANTHROPIC_BASE_URL itself.
+    await Agent(provider="claude", model="m", reporter=Reporter()).run("hi")
+    assert seen["env"] == {}
+
+
+def test_openai_organization(monkeypatch):
+    pytest.importorskip("openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setenv("OPENAI_ORG", "org-env")
+    assert OpenAIProvider()._make_client().organization == "org-env"
+    assert OpenAIProvider(organization="org-arg")._make_client().organization == "org-arg"
+
+
 # ── Subagents ──────────────────────────────────────────────────────────────
 
 

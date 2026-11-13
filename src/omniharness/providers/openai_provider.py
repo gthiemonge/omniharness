@@ -39,6 +39,7 @@ class OpenAIProvider(Provider):
         price_output: float | None = None,
         client: Any = None,
         options: dict[str, Any] | None = None,
+        organization: str | None = None,
     ):
         """
         Args:
@@ -50,6 +51,7 @@ class OpenAIProvider(Provider):
             client: A pre-built openai.AsyncOpenAI (or compatible) client.
             options: Extra fields merged into every responses.create() call
                 (e.g. {"temperature": 0}).
+            organization: OpenAI organization id. Defaults to OPENAI_ORG.
         """
         self.base_url = base_url or os.getenv("OPENAI_BASE_URL") or None
         self.api_key = api_key
@@ -57,6 +59,7 @@ class OpenAIProvider(Provider):
         self.price_output = _first_float(price_output, os.getenv("OPENAI_PRICE_OUTPUT"))
         self.client = client
         self.options = options or {}
+        self.organization = organization or os.getenv("OPENAI_ORG") or None
 
     def _make_client(self):
         try:
@@ -73,8 +76,8 @@ class OpenAIProvider(Provider):
         kwargs: dict[str, Any] = {"api_key": api_key}
         if self.base_url:
             kwargs["base_url"] = self.base_url
-        if os.getenv("OPENAI_ORG"):
-            kwargs["organization"] = os.getenv("OPENAI_ORG")
+        if self.organization:
+            kwargs["organization"] = self.organization
         return AsyncOpenAI(**kwargs)
 
     async def run(self, request: RunRequest, reporter: Reporter) -> RunResult:

@@ -4,6 +4,10 @@ omniharness command line.
     omniharness "Summarize this repo" --tools Read,Grep,Glob
     omniharness --skill examples/skills/changelog --work-dir ~/src/proj "last 20 commits"
     echo "What is 2+2?" | omniharness - --provider openai --model gpt-5-mini
+    omniharness --model auto --llama-server ~/llama.cpp/build/bin/llama-server "..."
+
+Every environment variable the harness reads has a flag here, except
+OPENAI_API_KEY: a key on the command line would show in `ps` and shell history.
 """
 
 import argparse
@@ -13,7 +17,7 @@ import sys
 from dataclasses import asdict
 
 from .agent import Agent
-from .config import format_presets
+from .config import DEFAULT_PROVIDER, format_presets
 from .providers import available_providers
 from .reporting import Reporter
 from .routing import D1Router
@@ -53,7 +57,17 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--auto-fallback", help="With --model auto: preset when d1 is unavailable.")
     p.add_argument("--d1-url", help="Running llama-server with d1-2B for --model auto "
                    "(env D1_URL; default: start one).")
-    p.add_argument("--base-url", help="OpenAI-compatible endpoint (env OPENAI_BASE_URL).")
+    p.add_argument("--llama-server", help="llama-server binary (llama.cpp v0.8.0+) to start "
+                   "for --model auto (env LLAMA_SERVER; default: from PATH).")
+    p.add_argument("--d1-model", help="d1-2B GGUF file for --model auto (env D1_MODEL; "
+                   "default: from the Hugging Face cache).")
+    p.add_argument("--base-url", help="Custom API endpoint for the provider (env "
+                   "ANTHROPIC_BASE_URL for claude, OPENAI_BASE_URL for openai).")
+    p.add_argument("--openai-org", help="OpenAI organization id (env OPENAI_ORG).")
+    p.add_argument("--openai-price-input", type=float, help="OpenAI input price, USD per "
+                   "1M tokens, for cost reporting (env OPENAI_PRICE_INPUT).")
+    p.add_argument("--openai-price-output", type=float, help="OpenAI output price, USD per "
+                   "1M tokens, for cost reporting (env OPENAI_PRICE_OUTPUT).")
     p.add_argument("--quiet", "-q", action="store_true",
                    help="Only print the final answer.")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
@@ -96,11 +110,22 @@ def main(argv=None) -> int:
     else:
         tools = [t.strip() for t in tools_arg.split(",") if t.strip()]
 
+    provider = (args.provider or os.getenv("AGENT_PROVIDER") or DEFAULT_PROVIDER).lower()
     provider_options = {}
     if args.base_url:
-        if (args.provider or os.getenv("AGENT_PROVIDER")) != "openai":
-            build_parser().error("--base-url requires --provider openai")
         provider_options["base_url"] = args.base_url
+    openai_only = {"organization": args.openai_org, "price_input": args.openai_price_input,
+                   "price_output": args.openai_price_output}
+    openai_only = {k: v for k, v in openai_only.items() if v is not None}
+    if openai_only:
+        if provider != "openai":
+            build_parser().error("--openai-org / --openai-price-* need --provider openai")
+        provider_options.update(openai_only)
+
+    router = None
+    if args.d1_url or args.llama_server or args.d1_model:
+        router = D1Router(args.d1_url, llama_server=args.llama_server,
+                          model_path=args.d1_model)
 
     quiet = args.quiet or args.json
     try:
@@ -117,7 +142,7 @@ def main(argv=None) -> int:
             env=env,
             reporter=Reporter() if quiet else None,
             provider_options=provider_options,
-            router=D1Router(args.d1_url) if args.d1_url else None,
+            router=router,
             auto_presets=args.auto_presets.split(",") if args.auto_presets else None,
             auto_fallback=args.auto_fallback,
         )
