@@ -10,6 +10,7 @@ High-level entry point.
 """
 
 import asyncio
+import contextvars
 import os
 from collections.abc import Sequence
 from typing import Any
@@ -22,6 +23,14 @@ from .tools.base import Tool
 from .tools.builtin import get_builtin
 
 ToolSpec = Tool | str
+
+# Results of subagent runs started while the current Agent.run() is active.
+# A contextvar (rather than state on the Agent) keeps concurrent runs apart:
+# asyncio tasks and worker threads inherit the context of the run that
+# started them.
+_subagent_results: contextvars.ContextVar[list[RunResult] | None] = contextvars.ContextVar(
+    "omniharness_subagent_results", default=None
+)
 
 
 class Agent:
@@ -96,10 +105,52 @@ class Agent:
             add_dirs=self.add_dirs,
             env=self.env,
         )
-        self.reporter.on_start(self.provider.name, self.model)
-        result = await self.provider.run(request, self.reporter)
+        parent_results = _subagent_results.get()
+        children: list[RunResult] = []
+        token = _subagent_results.set(children)
+        try:
+            self.reporter.on_start(self.provider.name, self.model)
+            result = await self.provider.run(request, self.reporter)
+        finally:
+            _subagent_results.reset(token)
+        result.subagents = children
+        if parent_results is not None:
+            parent_results.append(result)
         self.reporter.on_result(result)
         return result
+
+    def as_tool(self, name: str, description: str) -> Tool:
+        """Expose this agent as a tool, so another agent can delegate to it.
+
+        The calling agent sends a self-contained `task` and receives this
+        agent's final answer. The subagent's run is attached to the caller's
+        RunResult.subagents, so cumulative_usage / cumulative_cost_usd cover it.
+        """
+
+        async def run_subagent(task: str) -> str:
+            result = await self.run(task)
+            if not result.success:
+                return (f"Error: subagent '{name}' stopped ({result.subtype}). "
+                        f"Partial output:\n{result.final_text}")
+            return result.final_text or "(no output)"
+
+        return Tool(
+            name=name,
+            description=description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task": {
+                        "type": "string",
+                        "description": "Complete, self-contained instructions. The "
+                                       "subagent cannot see your conversation.",
+                    },
+                },
+                "required": ["task"],
+                "additionalProperties": False,
+            },
+            func=run_subagent,
+        )
 
     def run_sync(self, prompt: str) -> RunResult:
         """Blocking wrapper around run() for scripts."""

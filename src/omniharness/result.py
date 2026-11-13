@@ -47,6 +47,17 @@ class Usage:
     def total_tokens(self) -> int:
         return self.total_input_tokens + self.output_tokens
 
+    def __add__(self, other: "Usage") -> "Usage":
+        return Usage(
+            input_tokens=self.input_tokens + other.input_tokens,
+            cache_read_input_tokens=self.cache_read_input_tokens + other.cache_read_input_tokens,
+            cache_creation_input_tokens=(
+                self.cache_creation_input_tokens + other.cache_creation_input_tokens
+            ),
+            output_tokens=self.output_tokens + other.output_tokens,
+            reasoning_tokens=self.reasoning_tokens + other.reasoning_tokens,
+        )
+
 
 @dataclass
 class RunResult:
@@ -69,3 +80,26 @@ class RunResult:
     model: str = ""
     # Extra free-form notes to print.
     notes: list[str] = field(default_factory=list)
+    # Runs of subagents this agent called (see Agent.as_tool), in completion order.
+    subagents: list["RunResult"] = field(default_factory=list)
+
+    def all_runs(self) -> list["RunResult"]:
+        """This run followed by every nested subagent run."""
+        runs = [self]
+        for sub in self.subagents:
+            runs += sub.all_runs()
+        return runs
+
+    @property
+    def cumulative_usage(self) -> Usage:
+        """Token usage of this run plus all subagent runs."""
+        total = Usage()
+        for run in self.all_runs():
+            total = total + run.usage
+        return total
+
+    @property
+    def cumulative_cost_usd(self) -> float | None:
+        """Cost of this run plus all subagent runs; None if any cost is unknown."""
+        costs = [run.total_cost_usd for run in self.all_runs()]
+        return None if None in costs else sum(costs)

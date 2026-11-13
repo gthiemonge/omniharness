@@ -79,11 +79,13 @@ All examples run as-is. Switch provider with `AGENT_PROVIDER=openai`.
 | [`03_custom_tools.py`](examples/03_custom_tools.py) | `@tool` functions (sync, typed, with `Literal`), `ToolContext` injection |
 | [`04_skill_runner.py`](examples/04_skill_runner.py) + [`skills/changelog`](examples/skills/changelog/SKILL.md) | Running a Claude-style `SKILL.md` with helper scripts on any provider (the openstack-review pattern) |
 | [`05_structured_output.py`](examples/05_structured_output.py) | Reliable structured output through a `submit_result` tool, plus a custom JSONL `Reporter` |
+| [`06_subagents.py`](examples/06_subagents.py) | Mid-tier orchestrator delegating to low-tier `explorer` / `runner` subagents in parallel |
 
 ```bash
 python examples/02_code_explorer.py ~/src/octavia "How are amphora health checks scheduled?"
 python examples/04_skill_runner.py examples/skills/changelog ~/src/octavia "since 14.0.0"
 python examples/05_structured_output.py ~/src/octavia
+python examples/06_subagents.py ~/src/octavia
 ```
 
 ## Configuration
@@ -135,12 +137,44 @@ Agent(provider="openai", provider_options={"base_url": "http://localhost:11434/v
 Tools run with the permissions of your process. `Write` and `Bash` are not
 sandboxed on the openai provider, so run untrusted tasks in a container.
 
+## Subagents
+
+A subagent is an `Agent` exposed to another agent as a tool. The parent sends
+it a self-contained `task` and gets back its final answer:
+
+```python
+worker = Agent(preset="quick", tools=READ_ONLY_TOOLS, work_dir=repo,
+               system_prompt="Answer the task concisely, citing path:line.",
+               reporter=ConsoleReporter(prefix="    │ worker: ", show_summary=False))
+
+lead = Agent(preset="standard", work_dir=repo,
+             tools=["Glob", worker.as_tool("explorer", "Delegate a code-reading question.")])
+result = lead.run_sync("Write an onboarding guide for this repo.")
+
+result.subagents              # RunResult of each direct subagent call
+result.all_runs()             # this run + every nested subagent run, flattened
+result.cumulative_cost_usd    # parent + all subagents
+result.cumulative_usage       # same for tokens
+```
+
+- Each tier picks its own model, or its own provider: a Claude lead can drive
+  workers on an OpenAI-compatible endpoint.
+- File contents and command output stay in the cheap workers' context. The
+  lead only sees their summaries.
+- Calls issued in the same turn run concurrently on both providers.
+- Subagent runs attach to the run that called them, even with several runs in
+  flight. Tracking uses a context variable, not state on the `Agent`.
+- On Claude only, the SDK's native subagents (`ClaudeAgentOptions.agents`, via
+  `provider_options={"options": {"agents": ...}}`) are an alternative, but
+  they don't port to other providers.
+
 ## Progress reporting
 
 `ConsoleReporter` (the default) prints assistant text, a one-line summary of
 each tool call, abbreviated tool results, and a final usage/cost summary.
-Subclass `Reporter` (`on_start`, `on_text`, `on_tool_call`, `on_tool_result`,
-`on_result`) to log elsewhere. `Reporter()` itself is silent.
+Use `prefix=` to label a subagent's lines and `show_summary=False` to skip its
+per-run summary. Subclass `Reporter` (`on_start`, `on_text`, `on_tool_call`,
+`on_tool_result`, `on_result`) to log elsewhere. `Reporter()` itself is silent.
 
 ## Adding a provider
 

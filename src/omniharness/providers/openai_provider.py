@@ -12,6 +12,7 @@ Works with any OpenAI-compatible endpoint that implements /v1/responses
   explicit argument -> OPENAI_BASE_URL -> official API default.
 """
 
+import asyncio
 import json
 import os
 from typing import Any
@@ -140,7 +141,9 @@ class OpenAIProvider(Provider):
                 result.subtype = "success"
                 break
 
-            for call in tool_calls:
+            # Run this turn's calls concurrently (e.g. a fan-out to several
+            # subagents); outputs go back in call order.
+            async def execute(call: Any) -> str:
                 try:
                     args = json.loads(call.arguments or "{}")
                 except json.JSONDecodeError:
@@ -148,6 +151,10 @@ class OpenAIProvider(Provider):
                 reporter.on_tool_call(call.name, args)
                 output = await registry.dispatch(call.name, args, ctx)
                 reporter.on_tool_result(call.name, output, output.startswith("Error"))
+                return output
+
+            outputs = await asyncio.gather(*(execute(call) for call in tool_calls))
+            for call, output in zip(tool_calls, outputs, strict=True):
                 input_items.append({
                     "type": "function_call_output",
                     "call_id": call.call_id,

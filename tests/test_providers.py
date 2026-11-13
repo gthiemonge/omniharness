@@ -149,3 +149,71 @@ async def test_claude_provider_maps_tools_and_messages(monkeypatch):
     ]
     assert result.success and result.final_text == "3" and result.session_id == "s1"
     assert result.usage.total_input_tokens == 15 and result.total_cost_usd == 0.5
+
+
+# ── Subagents ──────────────────────────────────────────────────────────────
+
+
+async def test_subagents_run_in_parallel_and_roll_up():
+    import asyncio
+
+    started = 0
+    both_started = asyncio.Event()
+
+    class RoutingResponses:
+        """Orchestrator fans out twice, then answers; workers wait for each other."""
+
+        def __init__(self):
+            self.with_raw_response = self
+            self.orchestrator_turns = 0
+
+        async def create(self, **params):
+            nonlocal started
+            if params["model"] == "gpt-5":
+                self.orchestrator_turns += 1
+                if self.orchestrator_turns == 1:
+                    calls = [NS(type="function_call", call_id=f"c{i}", name="worker",
+                                arguments=json.dumps({"task": f"part {i}"})) for i in (1, 2)]
+                    response = NS(output=calls, usage=_usage(1000, 100))
+                else:
+                    outputs = [i["output"] for i in params["input"]
+                               if i.get("type") == "function_call_output"]
+                    response = NS(output=[NS(type="message",
+                                             content=[NS(text=" + ".join(outputs))])],
+                                  usage=_usage(2000, 50))
+            else:
+                started += 1
+                if started == 2:
+                    both_started.set()
+                # Deadlocks (and times out) unless both workers run concurrently.
+                await asyncio.wait_for(both_started.wait(), timeout=2)
+                task = params["input"][0]["content"]
+                response = NS(output=[NS(type="message", content=[NS(text=f"done {task}")])],
+                              usage=_usage(500, 20))
+            return NS(parse=lambda: response, headers={})
+
+    client = NS(responses=RoutingResponses())
+    worker = Agent(provider=OpenAIProvider(client=client), model="gpt-5-mini",
+                   reporter=Reporter())
+    orchestrator = Agent(provider=OpenAIProvider(client=client), model="gpt-5",
+                         tools=[worker.as_tool("worker", "Does work.")], reporter=Reporter())
+
+    result = await orchestrator.run("go")
+
+    assert result.final_text == "done part 1 + done part 2"
+    assert [r.model for r in result.subagents] == ["gpt-5-mini", "gpt-5-mini"]
+    assert result.cumulative_usage.total_tokens == 3150 + 2 * 520
+    expected = result.total_cost_usd + sum(r.total_cost_usd for r in result.subagents)
+    assert result.cumulative_cost_usd == pytest.approx(expected)
+    # A later top-level run of the worker is not attached to the orchestrator.
+    await worker.run("alone")
+    assert len(result.subagents) == 2
+
+
+async def test_failed_subagent_reports_error():
+    script = [NS(output=[NS(type="function_call", call_id="c", name="add",
+                            arguments='{"a": 1, "b": 1}')], usage=_usage(1, 1))]
+    worker = Agent(provider=OpenAIProvider(client=NS(responses=FakeResponses(script))),
+                   model="gpt-5-mini", tools=[add], max_turns=1, reporter=Reporter())
+    output = await worker.as_tool("w", "x").ainvoke({"task": "t"}, None)
+    assert output.startswith("Error: subagent 'w' stopped (error_max_turns)")

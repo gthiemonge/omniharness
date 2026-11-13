@@ -59,13 +59,22 @@ class ConsoleReporter(Reporter):
     """Print the agent's text, tool calls and (abbreviated) tool results."""
 
     def __init__(self, stream: TextIO | None = None, show_tool_results: bool = True,
-                 max_result_lines: int = 20):
+                 max_result_lines: int = 20, prefix: str = "", show_summary: bool = True):
+        """
+        Args:
+            prefix: Prepended to every line, e.g. "[explorer] " to tell
+                concurrent subagents apart.
+            show_summary: Print the usage/cost summary when a run ends.
+        """
         self.stream = stream or sys.stdout
         self.show_tool_results = show_tool_results
         self.max_result_lines = max_result_lines
+        self.prefix = prefix
+        self.show_summary = show_summary
 
     def _print(self, text: str = "") -> None:
-        print(text, file=self.stream, flush=True)
+        lines = text.split("\n") if self.prefix else [text]
+        print("\n".join(self.prefix + line for line in lines), file=self.stream, flush=True)
 
     def on_start(self, provider: str, model: str) -> None:
         self._print(f"Provider: {provider}  Model: {model}")
@@ -89,7 +98,8 @@ class ConsoleReporter(Reporter):
         self._print()
 
     def on_result(self, result: RunResult) -> None:
-        self._print(format_summary(result))
+        if self.show_summary:
+            self._print(format_summary(result))
 
 
 def format_summary(result: RunResult) -> str:
@@ -143,6 +153,22 @@ def format_summary(result: RunResult) -> str:
     if result.total_cost_usd is not None:
         out.append("")
         out.append(f"Total cost: ${result.total_cost_usd:.4f}")
+
+    if result.subagents:
+        out.append("")
+        out.append(f"Subagents: {len(result.all_runs()) - 1} run(s)")
+        by_model: dict[str, list[RunResult]] = {}
+        for run in result.all_runs()[1:]:
+            by_model.setdefault(run.model, []).append(run)
+        for model, runs in by_model.items():
+            tokens = sum(r.usage.total_tokens for r in runs)
+            costs = [r.total_cost_usd for r in runs]
+            cost = "unknown" if None in costs else f"${sum(costs):.4f}"
+            out.append(f"  {model}: {len(runs)} run(s), {tokens:,} tokens, {cost}")
+        cumulative = result.cumulative_cost_usd
+        out.append(f"  Total tokens incl. subagents: {result.cumulative_usage.total_tokens:,}")
+        if cumulative is not None:
+            out.append(f"  Total cost incl. subagents:   ${cumulative:.4f}")
 
     out.extend(result.notes)
     return "\n".join(out)
