@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "omniharness"
+version = "0.1.0"
+description = "A small, provider-agnostic harness for running tool-using AI agents (Claude Agent SDK or OpenAI Responses API)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache License 2.0"}
+authors = [
+    {name = "Gregory Thiemonge", email = "gthiemon@redhat.com"}
+]
+keywords = ["agent", "llm", "claude", "openai", "tools", "harness"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+]
+
+# No hard dependency on any provider SDK: install the extra(s) you need.
+dependencies = []
+
+[project.optional-dependencies]
+claude = ["claude-agent-sdk"]
+openai = ["openai>=1.66"]
+all = ["claude-agent-sdk", "openai>=1.66"]
+dev = ["pytest", "pytest-asyncio", "ruff"]
+
+[project.scripts]
+omniharness = "omniharness.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
