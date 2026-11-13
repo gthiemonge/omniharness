@@ -8,7 +8,8 @@ from omniharness import RunResult, cli
 @pytest.fixture
 def captured(monkeypatch):
     """Replace Agent with a recorder; returns the kwargs of the last Agent built."""
-    for var in ("AGENT_PROVIDER", "AGENT_MODEL", "AGENT_PRESET", "AGENT_EFFORT"):
+    for var in ("AGENT_PROVIDER", "AGENT_MODEL", "AGENT_PRESET", "AGENT_PRESETS",
+                "AGENT_EFFORT"):
         monkeypatch.delenv(var, raising=False)
     calls = {}
 
@@ -70,7 +71,7 @@ def test_d1_flags_build_a_router(captured, tmp_path):
 def test_env_vars_all_have_flags():
     """Every env var the package reads has a CLI flag (OPENAI_API_KEY excepted on purpose)."""
     help_text = cli.build_parser().format_help()
-    for var in ("AGENT_PROVIDER", "AGENT_MODEL", "AGENT_PRESET", "AGENT_EFFORT",
-                "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "OPENAI_ORG", "OPENAI_PRICE_INPUT",
+    for var in ("AGENT_PROVIDER", "AGENT_MODEL", "AGENT_PRESET", "AGENT_PRESETS",
+                "AGENT_EFFORT", "ANTHROPIC_BASE_URL", "OPENAI_BASE_URL", "OPENAI_ORG", "OPENAI_PRICE_INPUT",
                 "OPENAI_PRICE_OUTPUT", "D1_URL", "LLAMA_SERVER", "D1_MODEL"):
         assert var in help_text, var

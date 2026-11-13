@@ -17,7 +17,7 @@ import sys
 from dataclasses import asdict
 
 from .agent import Agent
-from .config import DEFAULT_PROVIDER, format_presets
+from .config import DEFAULT_PROVIDER, format_presets, get_presets, load_presets
 from .providers import available_providers
 from .reporting import Reporter
 from .routing import D1Router
@@ -38,6 +38,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="Model id, or 'auto' to let the local d1 decision model "
                    "pick a preset from the prompt (env AGENT_MODEL; overrides --preset).")
     p.add_argument("--preset", help="Model preset: quick, standard, thorough (env AGENT_PRESET).")
+    p.add_argument("--presets", metavar="FILE", help="TOML or JSON file of presets, merged "
+                   "over the built-in ones; a preset can set its own base_url, "
+                   "api_key_env, ... (env AGENT_PRESETS).")
     p.add_argument("--effort", help="Reasoning effort: low, medium, high (env AGENT_EFFORT).")
     p.add_argument("--max-turns", type=int, help="Maximum agent turns.")
     p.add_argument("--tools", default="",
@@ -71,15 +74,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", "-q", action="store_true",
                    help="Only print the final answer.")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
-    p.add_argument("--list-presets", action="store_true", help="List presets and exit.")
+    p.add_argument("--list-presets", action="store_true",
+                   help="List the presets in effect (with --presets / AGENT_PRESETS) and exit.")
     return p
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
+    try:
+        presets = load_presets(args.presets) if args.presets else get_presets()
+    except (OSError, ValueError) as exc:
+        print(f"Error: presets: {exc}", file=sys.stderr)
+        return 1
 
     if args.list_presets:
-        print(format_presets())
+        print(format_presets(presets))
         return 0
 
     prompt = args.prompt
@@ -133,6 +142,7 @@ def main(argv=None) -> int:
             provider=args.provider,
             model=args.model,
             preset=args.preset,
+            presets=presets,
             system_prompt=system_prompt,
             tools=tools,
             work_dir=args.work_dir,

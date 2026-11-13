@@ -15,7 +15,7 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
-from .config import AUTO, DEFAULT_PRESETS, ModelConfig, resolve_model
+from .config import AUTO, ModelConfig, endpoint_kwargs, get_presets, preset_config, resolve_model
 from .providers import Provider, get_provider
 from .reporting import ConsoleReporter, Reporter
 from .result import RouteDecision, RunRequest, RunResult
@@ -70,7 +70,9 @@ class Agent:
             add_dirs: Extra directories the agent may access (claude provider).
             env: Extra environment variables for the agent's tools.
             reporter: Progress sink. Defaults to ConsoleReporter().
-            presets: Your own preset table (see config.DEFAULT_PRESETS).
+            presets: Your own preset table (see config.DEFAULT_PRESETS and
+                load_presets()). Default: DEFAULT_PRESETS merged with the file
+                named by AGENT_PRESETS, if set.
             provider_options: kwargs for the provider constructor when
                 `provider` is a name (e.g. {"base_url": ...} for openai).
             router: Picks a preset per run when the model or preset is "auto".
@@ -82,18 +84,20 @@ class Agent:
                 the router's fallback_preset, clamped to auto_presets.
         """
         provider_name = provider.name if isinstance(provider, Provider) else provider
+        self.presets = presets if presets is not None else get_presets()
         self.model_config: ModelConfig = resolve_model(
-            provider_name, preset, model, presets=presets
+            provider_name, preset, model, presets=self.presets
         )
-        if isinstance(provider, Provider):
-            self.provider = provider
-        else:
-            self.provider = get_provider(self.model_config.provider, **(provider_options or {}))
+        # A Provider instance is used as is; a name is built per endpoint, since
+        # presets can point at different endpoints (see _provider_for).
+        self._fixed_provider = provider if isinstance(provider, Provider) else None
+        self._provider_options = dict(provider_options or {})
+        self._providers: dict[str, Provider] = {}
+        self.provider = self._provider_for(self.model_config)
 
         self.system_prompt = system_prompt
         self.tools: list[Tool] = [get_builtin(t) if isinstance(t, str) else t for t in tools]
         self.work_dir = os.path.abspath(os.path.expanduser(work_dir or os.getcwd()))
-        self.presets = presets
         self.router = router
         # With "auto", an explicit max_turns wins; otherwise the routed preset's.
         self._explicit_max_turns = max_turns
@@ -122,7 +126,7 @@ class Agent:
         """Fail at construction, not at the first run, on presets that can't be used."""
         router = self.router or get_default_router()
         provider = self.model_config.provider
-        table = (self.presets if self.presets is not None else DEFAULT_PRESETS).get(provider, {})
+        table = self.presets.get(provider, {})
         usable = [p for p in router.tier_order if p in table]
         if auto_presets is None:
             allowed = usable
@@ -139,20 +143,38 @@ class Agent:
             raise ValueError(f"auto_fallback '{auto_fallback}' is not in {allowed}")
         self.auto_presets = allowed
 
-    async def _select_model(self, prompt: str) -> tuple[str, int, RouteDecision | None]:
+    def _provider_for(self, config: ModelConfig) -> Provider:
+        """The provider for a model config: its preset's endpoint, then explicit options."""
+        if self._fixed_provider is not None:
+            if config.endpoint:
+                raise ValueError(
+                    f"{config.source} sets an endpoint ({', '.join(config.endpoint)}): pass "
+                    "the provider by name so the harness can configure it")
+            return self._fixed_provider
+        key = repr(sorted(config.endpoint.items()))
+        if key not in self._providers:
+            # Explicit provider_options (e.g. --base-url) win over the preset's.
+            kwargs = {**endpoint_kwargs(config.provider, config.endpoint),
+                      **self._provider_options}
+            self._providers[key] = get_provider(config.provider, **kwargs)
+        return self._providers[key]
+
+    async def _select_model(self, prompt: str
+                            ) -> tuple[str, int, Provider, RouteDecision | None]:
         if not self.auto:
-            return self.model, self.max_turns, None
+            return self.model, self.max_turns, self.provider, None
         router = self.router or get_default_router()
         decision = await router.route(prompt, self.system_prompt,
                                       allowed=self.auto_presets, fallback=self.auto_fallback)
-        config = resolve_model(self.model_config.provider, decision.preset,
-                               presets=self.presets)
+        # The preset directly, not resolve_model(): AGENT_MODEL may be "auto" itself.
+        config = preset_config(self.model_config.provider, decision.preset, self.presets)
         decision.model = config.model
-        return config.model, self._explicit_max_turns or config.max_turns, decision
+        return (config.model, self._explicit_max_turns or config.max_turns,
+                self._provider_for(config), decision)
 
     async def run(self, prompt: str) -> RunResult:
         """Run one task to completion."""
-        model, max_turns, decision = await self._select_model(prompt)
+        model, max_turns, provider, decision = await self._select_model(prompt)
         if decision is not None:
             self.reporter.on_route(decision)
         request = RunRequest(
@@ -170,8 +192,8 @@ class Agent:
         children: list[RunResult] = []
         token = _subagent_results.set(children)
         try:
-            self.reporter.on_start(self.provider.name, model)
-            result = await self.provider.run(request, self.reporter)
+            self.reporter.on_start(provider.name, model)
+            result = await provider.run(request, self.reporter)
         finally:
             _subagent_results.reset(token)
         result.subagents = children

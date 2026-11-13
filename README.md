@@ -109,6 +109,7 @@ and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
 | OpenAI organization | `provider_options={"organization": ...}` | `--openai-org` | `OPENAI_ORG` | none |
 | OpenAI prices (USD / 1M tokens) | `provider_options={"price_input": ..., "price_output": ...}` | `--openai-price-input/-output` | `OPENAI_PRICE_INPUT/OUTPUT` | `pricing.PRICING` table |
 | OpenAI API key | `provider_options={"api_key": ...}` | none | `OPENAI_API_KEY` | required |
+| presets file | `presets=load_presets(path)` | `--presets` | `AGENT_PRESETS` | built-in presets |
 | d1 server (`auto`) | `D1Router(url=)` | `--d1-url` | `D1_URL` | start one |
 | llama-server binary (`auto`) | `D1Router(llama_server=)` | `--llama-server` | `LLAMA_SERVER` | `PATH` |
 | d1 model file (`auto`) | `D1Router(model_path=)` | `--d1-model` | `D1_MODEL` | Hugging Face cache (`HF_HUB_CACHE` / `HF_HOME`) |
@@ -117,9 +118,59 @@ The Claude SDK reads its own variables (`ANTHROPIC_API_KEY`,
 `CLAUDE_CODE_USE_VERTEX`, ...) directly. To set them for one agent, use
 `provider_options={"options": {"env": {...}}}`.
 
-Presets (`quick` / `standard` / `thorough`) live in `config.DEFAULT_PRESETS`.
-Pass your own table with `Agent(presets=...)`. Its shape is the same as
-openstack-review's `PRESETS`.
+### Your own presets and hosted models
+
+The built-in presets (`quick` / `standard` / `thorough`) live in
+`config.DEFAULT_PRESETS`. To change them, or to add models hosted behind an
+OpenAI-compatible endpoint (vLLM, llama.cpp, TGI, a gateway, ...), write a
+TOML or JSON file. It is merged over the built-in presets field by field. Each
+preset can bring its own endpoint:
+
+```toml
+[openai.quick]                       # the cheap tier, on a self-hosted model
+model = "Qwen/Qwen3-32B"
+base_url = "http://vllm.internal:8000/v1"
+api_key_env = "VLLM_API_KEY"         # the variable that holds the key
+price_input = 0.10                   # USD per 1M tokens, for cost reports
+price_output = 0.30
+
+[openai.coder]                       # a new preset
+model = "qwen3-coder"
+base_url = "http://vllm.internal:8001/v1"
+```
+
+```bash
+omniharness --presets my-presets.toml --list-presets
+omniharness --presets my-presets.toml --provider openai --preset quick "..."
+export AGENT_PRESETS=my-presets.toml        # for every agent in the process
+```
+
+```python
+from omniharness import Agent, load_presets
+agent = Agent(provider="openai", preset="quick", presets=load_presets("my-presets.toml"))
+```
+
+- **Fields:** `model`, `max_turns` and `description`, plus the preset's
+  endpoint. For `openai` that's `base_url`, `api_key_env`, `organization`,
+  `price_input` and `price_output`; for `claude`, `base_url` only. Anything
+  else is rejected, as is a literal `api_key`.
+- **Keys:** a preset with its own `base_url` never gets `OPENAI_API_KEY`, so
+  your OpenAI key isn't sent to another host. It gets the key from the
+  variable named by `api_key_env`, or the placeholder `EMPTY` (what vLLM
+  expects) if there's no such field.
+- **Explicit endpoint options win:** `--base-url` / `provider_options` beat
+  the preset's endpoint.
+- **With `model="auto"`,** the endpoint follows the routed preset: a task
+  routed to `quick` goes to the hosted model, one routed to `standard` goes to
+  OpenAI.
+- **Python:** `load_presets(path)` returns the merged table;
+  `load_presets(path, base={})` uses the file alone. `Agent(presets=...)` takes
+  a whole table, as before.
+- **The server must implement `/v1/responses`.** Tested with llama.cpp
+  v0.8.0's `llama-server --jinja` serving Qwen2.5-1.5B-Instruct: plain answers,
+  tool calls, key checking (a wrong key gets a 401) and cost reporting.
+
+See [`examples/presets.example.toml`](examples/presets.example.toml).
 
 For OpenAI, cost comes from a gateway's `x-litellm-response-cost` header when
 present. Otherwise it is computed from the pricing table; add models with

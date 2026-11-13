@@ -1,0 +1,32 @@
+# Your own presets, merged over the built-in ones field by field.
+#
+#   omniharness --presets examples/presets.example.toml --list-presets
+#   AGENT_PRESETS=my-presets.toml python examples/06_subagents.py . --worker-model auto
+#   Agent(presets=load_presets("my-presets.toml"), ...)
+#
+# Fields: model, max_turns, description, and the endpoint of that preset:
+#   openai: base_url, api_key_env, organization, price_input, price_output
+#   claude: base_url
+# A preset with its own base_url never gets OPENAI_API_KEY: name the variable
+# holding its key with api_key_env, or it sends the placeholder "EMPTY".
+
+# Cheap tier on a self-hosted model (vLLM, llama.cpp, TGI, ... with /v1/responses).
+[openai.quick]
+model = "Qwen/Qwen3-32B"
+base_url = "http://vllm.internal:8000/v1"
+api_key_env = "VLLM_API_KEY"
+price_input = 0.10        # USD per 1M tokens, for cost reports
+price_output = 0.30
+description = "Self-hosted Qwen3 32B"
+
+# A new preset, on another endpoint without authentication.
+[openai.coder]
+model = "qwen3-coder"
+max_turns = 60
+base_url = "http://vllm.internal:8001/v1"
+
+# standard / thorough keep their defaults (gpt-5 on OPENAI_BASE_URL / api.openai.com).
+
+# Claude models through a gateway:
+# [claude.standard]
+# base_url = "https://llm-gateway.example.com/anthropic"

@@ -6,7 +6,15 @@ or on any OpenAI Responses-compatible endpoint.
 """
 
 from .agent import Agent
-from .config import AUTO, DEFAULT_PRESETS, ModelConfig, format_presets, resolve_model
+from .config import (
+    AUTO,
+    DEFAULT_PRESETS,
+    ModelConfig,
+    format_presets,
+    load_presets,
+    merge_presets,
+    resolve_model,
+)
 from .pricing import register_pricing
 from .providers import Provider, get_provider, register_provider
 from .reporting import ConsoleReporter, Reporter, format_summary, print_usage_summary
@@ -53,7 +61,9 @@ __all__ = [
     "format_summary",
     "get_default_router",
     "get_provider",
+    "load_presets",
     "load_skill",
+    "merge_presets",
     "print_usage_summary",
     "register_pricing",
     "register_provider",
