@@ -8,6 +8,9 @@ Resolution order (first match wins):
   model:    explicit model > {PREFIX}MODEL env > preset (explicit >
             {PREFIX}PRESET env > default_preset)
 
+A model or preset of "auto" resolves to model "auto": the Agent then asks a
+router to pick a preset for each run (see routing.py).
+
 With the default prefix "AGENT_", e.g.:
   AGENT_PROVIDER=openai AGENT_PRESET=thorough python my_agent.py
 """
@@ -39,6 +42,9 @@ DEFAULT_PRESETS: dict[str, dict[str, dict]] = {
 DEFAULT_PROVIDER = "claude"
 DEFAULT_PRESET = "standard"
 DEFAULT_MAX_TURNS = 50
+
+# Model / preset value meaning "pick per run with a router" (see routing.py).
+AUTO = "auto"
 
 
 @dataclass
@@ -79,6 +85,9 @@ def resolve_model(
             f"Providers with presets: {', '.join(presets)}"
         )
     preset_name = preset or os.getenv(f"{env_prefix}PRESET") or default_preset
+    if preset_name == AUTO:
+        return ModelConfig(provider_name, AUTO, DEFAULT_MAX_TURNS,
+                           f"preset '{AUTO}' (provider '{provider_name}')")
     if preset_name not in provider_presets:
         raise ValueError(
             f"Unknown preset '{preset_name}' for provider '{provider_name}'. "

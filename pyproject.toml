@@ -41,6 +41,7 @@ where = ["src"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+markers = ["d1: needs the real d1 decision model (D1_URL or LLAMA_SERVER)"]
 
 [tool.ruff]
 line-length = 100

@@ -9,11 +9,14 @@ events elsewhere (logs, a UI, a test recorder, ...).
 import sys
 from typing import Any, TextIO
 
-from .result import RunResult
+from .result import RouteDecision, RunResult
 
 
 class Reporter:
     """Base reporter: ignores every event. Override what you need."""
+
+    def on_route(self, decision: RouteDecision) -> None:
+        """A model="auto" agent picked its model for the coming run."""
 
     def on_start(self, provider: str, model: str) -> None:
         pass
@@ -76,6 +79,9 @@ class ConsoleReporter(Reporter):
         lines = text.split("\n") if self.prefix else [text]
         print("\n".join(self.prefix + line for line in lines), file=self.stream, flush=True)
 
+    def on_route(self, decision: RouteDecision) -> None:
+        self._print(f"Auto model: {format_route(decision)}")
+
     def on_start(self, provider: str, model: str) -> None:
         self._print(f"Provider: {provider}  Model: {model}")
         self._print("-" * 60)
@@ -100,6 +106,25 @@ class ConsoleReporter(Reporter):
     def on_result(self, result: RunResult) -> None:
         if self.show_summary:
             self._print(format_summary(result))
+
+
+def format_route(decision: RouteDecision) -> str:
+    """e.g. "quick -> claude-haiku-4-5 (d1: fast 0.93, 712 ms)"."""
+    head = f"{decision.preset} -> {decision.model or '?'}"
+    if decision.source == "fallback":
+        return f"{head} (fallback: {decision.reason})"
+    if decision.label is None:
+        detail = decision.source
+    elif decision.method == "complexity":
+        detail = f"{decision.source}: {decision.label}, complexity {decision.complexity:.2f}"
+    else:
+        p = (decision.probabilities or {}).get(decision.choice)
+        detail = f"{decision.source}: {decision.label}" + (f" {p:.2f}" if p is not None else "")
+    if decision.clamped:
+        detail += f", {decision.choice} not allowed"
+    if decision.elapsed_ms is not None:
+        detail += f", {decision.elapsed_ms:.0f} ms"
+    return f"{head} ({detail})"
 
 
 def format_summary(result: RunResult) -> str:

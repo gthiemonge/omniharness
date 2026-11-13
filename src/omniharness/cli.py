@@ -16,6 +16,7 @@ from .agent import Agent
 from .config import format_presets
 from .providers import available_providers
 from .reporting import Reporter
+from .routing import D1Router
 from .skill import load_skill
 from .tools.builtin import BUILTIN_TOOLS
 
@@ -30,7 +31,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("prompt", nargs="?", help="Task for the agent ('-' reads stdin).")
     p.add_argument("--provider", choices=available_providers(),
                    help="Provider (env AGENT_PROVIDER, default claude).")
-    p.add_argument("--model", help="Model id (env AGENT_MODEL; overrides --preset).")
+    p.add_argument("--model", help="Model id, or 'auto' to let the local d1 decision model "
+                   "pick a preset from the prompt (env AGENT_MODEL; overrides --preset).")
     p.add_argument("--preset", help="Model preset: quick, standard, thorough (env AGENT_PRESET).")
     p.add_argument("--effort", help="Reasoning effort: low, medium, high (env AGENT_EFFORT).")
     p.add_argument("--max-turns", type=int, help="Maximum agent turns.")
@@ -46,6 +48,11 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--skill", help="SKILL.md (or its directory) to use as the system prompt.")
     p.add_argument("--output-dir", default=os.getcwd(),
                    help="Where a --skill writes its outputs (exposed as $OUTPUT_DIR).")
+    p.add_argument("--auto-presets", help="With --model auto: comma-separated presets "
+                   "allowed, e.g. quick,standard.")
+    p.add_argument("--auto-fallback", help="With --model auto: preset when d1 is unavailable.")
+    p.add_argument("--d1-url", help="Running llama-server with d1-2B for --model auto "
+                   "(env D1_URL; default: start one).")
     p.add_argument("--base-url", help="OpenAI-compatible endpoint (env OPENAI_BASE_URL).")
     p.add_argument("--quiet", "-q", action="store_true",
                    help="Only print the final answer.")
@@ -110,6 +117,9 @@ def main(argv=None) -> int:
             env=env,
             reporter=Reporter() if quiet else None,
             provider_options=provider_options,
+            router=D1Router(args.d1_url) if args.d1_url else None,
+            auto_presets=args.auto_presets.split(",") if args.auto_presets else None,
+            auto_fallback=args.auto_fallback,
         )
         result = agent.run_sync(prompt)
     except Exception as exc:  # noqa: BLE001

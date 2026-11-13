@@ -1,0 +1,34 @@
+{"prompt": "What is the capital of Australia?", "expected": "quick"}
+{"prompt": "Convert 72 degrees Fahrenheit to Celsius.", "expected": "quick"}
+{"prompt": "List the Python files under src/ with their line counts.", "expected": "quick"}
+{"prompt": "In the repo at /srv/project, list the Python files under src/ with their line counts. Report them as a table, sorted by size. Do not read the files' contents.", "expected": "quick"}
+{"prompt": "Run the unit tests and report how many pass.", "expected": "quick"}
+{"prompt": "In the repo at /srv/project, run the unit tests. Use the project's virtualenv if present (.venv/bin/pytest), otherwise python3 -m pytest. Report the exact command you ran, the number of tests passed/failed, and for any failure the test name and the assertion message. Do not modify any files and do not install packages.", "expected": "quick"}
+{"prompt": "Find every file that imports the requests library.", "expected": "quick"}
+{"prompt": "In the repo at /srv/project, find where the environment variable OPENAI_BASE_URL is read. Report each occurrence as path:line with the line's content. Do not explain the code.", "expected": "quick"}
+{"prompt": "Show the last 10 commits of this repository with their authors.", "expected": "quick"}
+{"prompt": "In the repo at /srv/project, check which Python version and which versions of pytest and ruff are installed in .venv, and report them.", "expected": "quick"}
+{"prompt": "Write a Python function that checks whether a string is a palindrome.", "expected": "quick"}
+{"prompt": "Rename the variable `tmp` to `buffer` in src/io.py.", "expected": "quick"}
+{"prompt": "Summarize this error message in one sentence: ConnectionRefusedError: [Errno 111] Connection refused while connecting to 127.0.0.1:5432", "expected": "quick"}
+{"prompt": "Explain the difference between TCP and UDP, with an example of when to use each.", "expected": "standard"}
+{"prompt": "Find how @tool functions are passed to the model in each provider.", "expected": "standard"}
+{"prompt": "In the repo at /srv/project, look at src/tools/base.py, src/providers/claude.py and src/providers/openai_provider.py. Explain how a function decorated with @tool is turned into a tool definition and how each provider passes it to the model. Report: (1) how the JSON schema is built, (2) how the claude provider exposes it, (3) how the openai provider exposes it. Cite path:line for every claim. Keep it under 300 words.", "expected": "standard"}
+{"prompt": "Implement an LRU cache in Python with O(1) get and put, and write unit tests for it.", "expected": "standard"}
+{"prompt": "In the repo at /srv/project, the test test_resume_session fails with KeyError: 'session_id'. Find the cause in the code under src/, fix it, and run the test to confirm. Report the root cause and the diff.", "expected": "standard"}
+{"prompt": "Add a --dry-run flag to the CLI in src/cli.py that prints what would be done without doing it, and update the tests.", "expected": "standard"}
+{"prompt": "Compare PostgreSQL and MongoDB for a multi-tenant SaaS application with strict reporting requirements, and recommend one.", "expected": "standard"}
+{"prompt": "In the repo at /srv/project, explain how configuration is loaded: which files, environment variables and command-line flags are read, in which order they override each other, and where defaults are defined. Cite path:line.", "expected": "standard"}
+{"prompt": "Refactor the provider factory so new providers register themselves with a decorator instead of being listed in a dict, keeping the public API unchanged.", "expected": "standard"}
+{"prompt": "Write a bash script that backs up a PostgreSQL database every night, keeps 7 daily and 4 weekly copies, and logs failures.", "expected": "standard"}
+{"prompt": "Review this pull request diff for bugs and suggest fixes: the change adds retry logic with exponential backoff to the HTTP client.", "expected": "standard"}
+{"prompt": "Derive the closed-form solution of ordinary least squares regression and explain when the matrix inverse does not exist.", "expected": "standard"}
+{"prompt": "Design a multi-region, strongly consistent key-value store: replication, failure detection, membership changes and client routing, with the latency trade-offs.", "expected": "thorough"}
+{"prompt": "In the repo at /srv/project, analyse how subagent runs are attached to their parent run when several runs happen concurrently, including across the claude provider's in-process MCP server. Identify any race conditions or cases where a subagent's result could be attached to the wrong parent, and explain why with path:line.", "expected": "thorough"}
+{"prompt": "Plan the migration of a 2-million-line monolithic banking application to microservices without downtime, covering data ownership, distributed transactions, audit trails and a phased rollout with rollback criteria.", "expected": "thorough"}
+{"prompt": "Prove that every planar graph is 5-colorable, then explain why the same approach does not directly give the four color theorem.", "expected": "thorough"}
+{"prompt": "In the repo at /srv/project, audit the authentication and session handling code for security vulnerabilities: token validation, CSRF, session fixation, timing attacks and privilege escalation paths. For each finding give the attack scenario, its severity and a fix.", "expected": "thorough"}
+{"prompt": "Design the sharding and rebalancing strategy for a time-series database ingesting 5 million points per second, including hot-partition handling and online resharding.", "expected": "thorough"}
+{"prompt": "In the repo at /srv/project, the service deadlocks about once a week under load. Analyse the locking across the worker pool, the job queue and the database connection pool, identify the possible lock-order inversions, and propose a design that rules them out.", "expected": "thorough"}
+{"prompt": "Specify a lock-free multi-producer multi-consumer queue in C++, argue its linearizability, and describe how to handle the ABA problem and memory reclamation.", "expected": "thorough"}
+{"prompt": "Design an evaluation methodology to decide whether a new ranking model improves search quality, covering offline metrics, interleaving experiments, statistical power and guardrail metrics.", "expected": "thorough"}

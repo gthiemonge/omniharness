@@ -15,10 +15,11 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
-from .config import ModelConfig, resolve_model
+from .config import AUTO, DEFAULT_PRESETS, ModelConfig, resolve_model
 from .providers import Provider, get_provider
 from .reporting import ConsoleReporter, Reporter
-from .result import RunRequest, RunResult
+from .result import RouteDecision, RunRequest, RunResult
+from .routing import Router, get_default_router
 from .tools.base import Tool
 from .tools.builtin import get_builtin
 
@@ -50,6 +51,9 @@ class Agent:
         reporter: Reporter | None = None,
         presets: dict[str, dict[str, dict]] | None = None,
         provider_options: dict[str, Any] | None = None,
+        router: Router | None = None,
+        auto_presets: Sequence[str] | None = None,
+        auto_fallback: str | None = None,
     ):
         """
         Args:
@@ -69,6 +73,13 @@ class Agent:
             presets: Your own preset table (see config.DEFAULT_PRESETS).
             provider_options: kwargs for the provider constructor when
                 `provider` is a name (e.g. {"base_url": ...} for openai).
+            router: Picks a preset per run when the model or preset is "auto".
+                Defaults to the process-wide D1Router (routing.py).
+            auto_presets: With "auto", the presets this agent may get, e.g.
+                ["quick", "standard"] for a worker. The router's pick is clamped
+                to the nearest one. Default: every preset the router knows.
+            auto_fallback: With "auto", the preset when routing fails. Default:
+                the router's fallback_preset, clamped to auto_presets.
         """
         provider_name = provider.name if isinstance(provider, Provider) else provider
         self.model_config: ModelConfig = resolve_model(
@@ -82,6 +93,16 @@ class Agent:
         self.system_prompt = system_prompt
         self.tools: list[Tool] = [get_builtin(t) if isinstance(t, str) else t for t in tools]
         self.work_dir = os.path.abspath(os.path.expanduser(work_dir or os.getcwd()))
+        self.presets = presets
+        self.router = router
+        # With "auto", an explicit max_turns wins; otherwise the routed preset's.
+        self._explicit_max_turns = max_turns
+        self.auto_presets: list[str] | None = None
+        self.auto_fallback = auto_fallback
+        if self.model_config.model == AUTO:
+            self._check_auto(auto_presets, auto_fallback)
+        elif auto_presets is not None or auto_fallback is not None:
+            raise ValueError("auto_presets / auto_fallback need model='auto' or preset='auto'")
         self.max_turns = max_turns or self.model_config.max_turns
         self.effort = effort or os.getenv("AGENT_EFFORT") or None
         self.add_dirs = [os.path.abspath(os.path.expanduser(d)) for d in add_dirs]
@@ -90,17 +111,57 @@ class Agent:
 
     @property
     def model(self) -> str:
+        """The configured model id, or "auto" when it is picked per run."""
         return self.model_config.model
+
+    @property
+    def auto(self) -> bool:
+        return self.model_config.model == AUTO
+
+    def _check_auto(self, auto_presets: Sequence[str] | None, auto_fallback: str | None) -> None:
+        """Fail at construction, not at the first run, on presets that can't be used."""
+        router = self.router or get_default_router()
+        provider = self.model_config.provider
+        table = (self.presets if self.presets is not None else DEFAULT_PRESETS).get(provider, {})
+        usable = [p for p in router.tier_order if p in table]
+        if auto_presets is None:
+            allowed = usable
+        else:
+            allowed = [p for p in router.tier_order if p in auto_presets]
+            unknown = [p for p in auto_presets if p not in usable]
+            if unknown:
+                raise ValueError(f"auto_presets {unknown} unusable: the router picks among "
+                                 f"{router.tier_order}, provider '{provider}' has {list(table)}")
+        if not allowed:
+            raise ValueError(f"no preset both the router ({router.tier_order}) and "
+                             f"provider '{provider}' ({list(table)}) know")
+        if auto_fallback is not None and auto_fallback not in allowed:
+            raise ValueError(f"auto_fallback '{auto_fallback}' is not in {allowed}")
+        self.auto_presets = allowed
+
+    async def _select_model(self, prompt: str) -> tuple[str, int, RouteDecision | None]:
+        if not self.auto:
+            return self.model, self.max_turns, None
+        router = self.router or get_default_router()
+        decision = await router.route(prompt, self.system_prompt,
+                                      allowed=self.auto_presets, fallback=self.auto_fallback)
+        config = resolve_model(self.model_config.provider, decision.preset,
+                               presets=self.presets)
+        decision.model = config.model
+        return config.model, self._explicit_max_turns or config.max_turns, decision
 
     async def run(self, prompt: str) -> RunResult:
         """Run one task to completion."""
+        model, max_turns, decision = await self._select_model(prompt)
+        if decision is not None:
+            self.reporter.on_route(decision)
         request = RunRequest(
-            model=self.model,
+            model=model,
             prompt=prompt,
             system_prompt=self.system_prompt,
             tools=self.tools,
             work_dir=self.work_dir,
-            max_turns=self.max_turns,
+            max_turns=max_turns,
             effort=self.effort,
             add_dirs=self.add_dirs,
             env=self.env,
@@ -109,11 +170,15 @@ class Agent:
         children: list[RunResult] = []
         token = _subagent_results.set(children)
         try:
-            self.reporter.on_start(self.provider.name, self.model)
+            self.reporter.on_start(self.provider.name, model)
             result = await self.provider.run(request, self.reporter)
         finally:
             _subagent_results.reset(token)
         result.subagents = children
+        result.route = decision
+        if decision is not None and decision.source == "fallback":
+            result.notes.append(f"Auto model fell back to preset '{decision.preset}': "
+                                f"{decision.reason}")
         if parent_results is not None:
             parent_results.append(result)
         self.reporter.on_result(result)

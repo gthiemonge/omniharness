@@ -21,6 +21,9 @@ calls at once.
     python examples/06_subagents.py . --worker-provider openai --worker-preset quick
     # Pick exact models per tier (overrides the presets)
     python examples/06_subagents.py . --orchestrator-model claude-opus-5-5 --worker-model claude-sonnet-5
+    # Let the local d1 decision model pick each worker task's model, between
+    # quick and standard (see 07_auto_model.py)
+    python examples/06_subagents.py . --worker-model auto
 
 Model selection, per tier: --*-model if given, else the --*-preset's model for
 the tier's provider. AGENT_MODEL is ignored here, since it would put both tiers
@@ -99,11 +102,18 @@ def main() -> int:
               "per tier. Use --orchestrator-model / --worker-model instead.",
               file=sys.stderr)
 
+    # With --worker-model auto, d1 picks each task's model, but a worker never
+    # goes above "standard" and falls back to "quick" if d1 is unavailable.
+    worker_auto = {}
+    if args.worker_model == "auto":
+        worker_auto = {"auto_presets": ["quick", "standard"], "auto_fallback": "quick"}
+
     def worker(name: str, system_prompt: str, tools: list, max_turns: int) -> Agent:
         return Agent(
             provider=args.worker_provider,
             model=args.worker_model,
             preset=args.worker_preset,
+            **worker_auto,
             system_prompt=system_prompt,
             tools=tools,
             work_dir=args.repo,
@@ -143,8 +153,10 @@ def main() -> int:
 
     print(f"Orchestrator: {orchestrator.model_config.provider}/{orchestrator.model} "
           f"({orchestrator.model_config.source})")
-    print(f"Workers:      {explorer.model_config.provider}/{explorer.model} "
-          f"({explorer.model_config.source})\n")
+    workers = f"{explorer.model_config.provider}/{explorer.model}"
+    if explorer.auto:
+        workers += f" among {explorer.auto_presets}, fallback {explorer.auto_fallback}"
+    print(f"Workers:      {workers} ({explorer.model_config.source})\n")
     result = orchestrator.run_sync(args.task)
     return 0 if result.success else 1
 

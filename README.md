@@ -80,12 +80,14 @@ All examples run as-is. Switch provider with `AGENT_PROVIDER=openai`.
 | [`04_skill_runner.py`](examples/04_skill_runner.py) + [`skills/changelog`](examples/skills/changelog/SKILL.md) | Running a Claude-style `SKILL.md` with helper scripts on any provider (the openstack-review pattern) |
 | [`05_structured_output.py`](examples/05_structured_output.py) | Reliable structured output through a `submit_result` tool, plus a custom JSONL `Reporter` |
 | [`06_subagents.py`](examples/06_subagents.py) | Mid-tier orchestrator delegating to low-tier `explorer` / `runner` subagents in parallel |
+| [`07_auto_model.py`](examples/07_auto_model.py) | `model="auto"`: a local decision model (d1-2B) picks the model per run; `--rate-only` to check routing |
 
 ```bash
 python examples/02_code_explorer.py ~/src/octavia "How are amphora health checks scheduled?"
 python examples/04_skill_runner.py examples/skills/changelog ~/src/octavia "since 14.0.0"
 python examples/05_structured_output.py ~/src/octavia
 python examples/06_subagents.py ~/src/octavia
+python examples/07_auto_model.py --rate-only
 ```
 
 ## Configuration
@@ -167,6 +169,108 @@ result.cumulative_usage       # same for tokens
 - On Claude only, the SDK's native subagents (`ClaudeAgentOptions.agents`, via
   `provider_options={"options": {"agents": ...}}`) are an alternative, but
   they don't port to other providers.
+
+## Automatic model selection
+
+With `model="auto"` (or `preset="auto"`, `--model auto`, `AGENT_MODEL=auto`), a
+router picks a preset for **each run**, from the prompt. A subagent with
+`model="auto"` is therefore routed per delegated task.
+
+The default router, `D1Router`, asks Liquid AI's
+[d1-2B](https://huggingface.co/LiquidAI/d1-2B) decision model *"Which
+assistant should handle this task?"*, with one described option per preset.
+d1 runs locally in llama-server and answers in under a second on CPU (about
+0.7–0.9 s measured).
+
+| d1 option | for | preset | claude | openai |
+|---|---|---|---|---|
+| fast | lookups, listing, running commands and reporting results, short or mechanical tasks | `quick` | claude-haiku-4-5 | gpt-5-mini |
+| capable | explaining, writing or changing code, comparing options, multi-step analysis | `standard` | claude-sonnet-5 | gpt-5 |
+| expert | open-ended design, subtle concurrency or correctness reasoning, deep expertise | `thorough` | claude-opus-5-5 | gpt-5 |
+
+Each agent sets its own limits; all agents share one router and one server:
+
+```python
+from omniharness import READ_ONLY_TOOLS, Agent
+
+lead = Agent(model="auto")                               # any preset
+worker = Agent(model="auto", tools=READ_ONLY_TOOLS,
+               auto_presets=["quick", "standard"],       # never Opus
+               auto_fallback="quick")                    # if d1 is down
+result = worker.run_sync("Design a rate limiter for a public API")
+result.route   # RouteDecision(choice="thorough", preset="standard", label="expert", ...)
+```
+
+d1 always sees every option. Its pick is then moved to the nearest preset the
+agent allows, so a task d1 calls "expert" goes to a worker's most capable
+preset, not its cheapest. On the CLI the same settings are
+`--model auto --auto-presets quick,standard --auto-fallback quick`.
+
+Setup:
+
+```bash
+hf download LiquidAI/d1-2B-GGUF d1-2B-Q8_0.gguf   # ~1.7 GB, into the HF cache
+# llama-server (llama.cpp v0.8.0+, for lfm3 and /v1/systemone) on PATH, or:
+export LLAMA_SERVER=/path/to/llama.cpp/build/bin/llama-server
+# or reuse a running server instead of starting one:
+export D1_URL=http://127.0.0.1:8080
+```
+
+Older llama.cpp builds, such as Fedora's `llama-cpp` package, fail with
+`unknown model architecture: 'lfm3'`. The router recognizes this error and
+says so.
+
+**Measured accuracy.** `evals/routing.jsonl` holds 34 prompts labelled with
+the tier they should get: chat prompts, and subagent tasks in the long,
+self-contained style an orchestrator writes. Labelling policy:
+
+- quick: facts and lookups, finding or listing things, running commands and
+  reporting their output, trivial snippets, mechanical edits
+- standard: explaining code or concepts, writing or changing non-trivial code,
+  debugging, comparisons, multi-step investigation
+- thorough: open-ended design, subtle concurrency, correctness or security
+  reasoning, proofs, large migrations
+
+With d1-2B Q8_0 on llama.cpp v0.8.0:
+
+| method | correct | too expensive | too cheap |
+|---|---|---|---|
+| `choice` (default) | 29/34 (85%) | 5 | 0 |
+| `complexity` | 20/34 (59%) | 9 | 5 |
+
+The `choice` misses were a trivial function and a rename sent to `standard`,
+plus a database comparison, a derivation and one vague one-liner sent to
+`thorough`. The `complexity` method (`D1Router(method="complexity")`, a
+5-level complexity score with cutoffs) rates nearly every task that needs tools as
+"moderate". It sent 9 of the 13 quick prompts to `standard`.
+
+Re-check after changing the descriptions, labels or model:
+
+```bash
+python scripts/routing_eval.py -v                      # both methods, every prompt
+LLAMA_SERVER=... pytest -m d1                          # fails below 80% or >1 too cheap
+python examples/07_auto_model.py --rate-only "..."     # one-off prompts
+```
+
+- **Descriptions**: pass your own as `D1Router(choices={preset: (label,
+  description), ...})`, cheapest first. Rewording them to repeat the
+  labelling policy scored the same (29/34) but sent the security audit to
+  `standard`, so the defaults were kept.
+- **Server**: without `D1_URL`, the router starts llama-server the first time
+  it's needed. It runs on a free local port, is shared by all `auto` agents in
+  the process (`get_default_router()`), and stops at exit or on
+  `router.close()`. The model comes from `model_path=`, then `$D1_MODEL`, then
+  the Hugging Face cache. llama-server's output goes to a temporary log, which
+  is kept if startup fails.
+- **Failures**: if d1 can't be started or doesn't answer, the run still goes
+  ahead on the agent's `auto_fallback`. Without one, it uses the router's
+  `fallback_preset` (`standard`), moved into the agent's allowed range. The
+  router logs a warning once and the run's `RunResult.notes` says so.
+- **What d1 sees**: the task prompt only, or the agent's instructions too with
+  `include_system_prompt=True`. Long prompts are cut to fit d1's single-batch
+  input.
+- **Other routers**: subclass `Router` (`tier_order` and an async `route()`
+  returning a `RouteDecision`). `FixedRouter("quick")` is handy in tests.
 
 ## Progress reporting
 
@@ -252,7 +356,10 @@ src/omniharness/
   reporting.py        Reporter, ConsoleReporter, format_summary
   pricing.py          OpenAI-style token pricing
   skill.py            SKILL.md loader
+  routing.py          model="auto": Router, D1Router (local d1-2B decision model)
   cli.py              omniharness command
   providers/          claude.py (Agent SDK), openai_provider.py (Responses loop)
   tools/              base.py (@tool, ToolRegistry), builtin.py (Read/Bash/...)
+evals/routing.jsonl   labelled prompts for model="auto"
+scripts/              routing_eval.py: check routing against them with the real d1
 ```

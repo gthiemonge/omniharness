@@ -60,6 +60,36 @@ class Usage:
 
 
 @dataclass
+class RouteDecision:
+    """How a model="auto" agent picked its preset for one run."""
+
+    # The preset used: the router's choice, clamped to the agent's allowed presets.
+    preset: str
+    # "d1", "fallback", "fixed", ...
+    source: str
+    # The router's own pick, before clamping (None on fallback).
+    choice: str | None = None
+    # "choice" or "complexity" for d1.
+    method: str | None = None
+    # d1's answer: the option label ("fast", ...) or complexity level ("moderate", ...).
+    label: str | None = None
+    # Mean complexity level (0 = trivial ... 4 = very complex), "complexity" only.
+    complexity: float | None = None
+    confidence: float | None = None
+    # Per preset ("choice") or per level "0".."4" ("complexity").
+    probabilities: dict[str, float] | None = None
+    elapsed_ms: float | None = None
+    # Why routing fell back, when it did.
+    reason: str | None = None
+    # Filled in by the Agent once the preset is resolved.
+    model: str = ""
+
+    @property
+    def clamped(self) -> bool:
+        return self.choice is not None and self.choice != self.preset
+
+
+@dataclass
 class RunResult:
     """Outcome of an agent run, normalized across providers."""
 
@@ -80,6 +110,8 @@ class RunResult:
     model: str = ""
     # Extra free-form notes to print.
     notes: list[str] = field(default_factory=list)
+    # Set when the model was chosen automatically (model="auto").
+    route: RouteDecision | None = None
     # Runs of subagents this agent called (see Agent.as_tool), in completion order.
     subagents: list["RunResult"] = field(default_factory=list)
 
