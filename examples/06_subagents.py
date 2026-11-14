@@ -34,7 +34,7 @@ import argparse
 import os
 import sys
 
-from omniharness import READ_ONLY_TOOLS, Agent, ConsoleReporter
+from omniharness import READ_ONLY_TOOLS, Agent, ConsoleReporter, RunResult
 
 DEFAULT_TASK = (
     "Write a one-page onboarding guide for this repository: what it does, how "
@@ -80,6 +80,43 @@ relevant lines of output (failures, counts, versions), at most ~200 words.
 """
 
 
+class WorkerReporter(ConsoleReporter):
+    """Prints a worker's progress with a prefix, and records each of its runs."""
+
+    def __init__(self, name: str, runs: list[RunResult]):
+        super().__init__(prefix=f"    │ {name}: ", show_tool_results=False, show_summary=False)
+        self.runs = runs
+
+    def on_result(self, result: RunResult) -> None:
+        self.runs.append(result)
+
+
+def _cost(runs: list[RunResult]) -> float | None:
+    costs = [r.total_cost_usd for r in runs]
+    return None if None in costs else sum(costs)
+
+
+def print_costs(result: RunResult, worker_runs: dict[str, list[RunResult]]) -> None:
+    """Cost of the orchestrator, of each worker, of all workers, and in total."""
+
+    def row(label: str, runs: list[RunResult] | None, tokens: int, cost: float | None) -> str:
+        n = "" if runs is None else f"{len(runs)} run{'s' if len(runs) != 1 else ''}"
+        models = "" if runs is None else ", ".join(sorted({r.model for r in runs}))
+        price = "unknown" if cost is None else f"${cost:.4f}"
+        return f"  {label:13s} {n:>7s} {tokens:>11,} tok {price:>9s}   {models}".rstrip()
+
+    def runs_row(label: str, runs: list[RunResult]) -> str:
+        return row(label, runs, sum(r.usage.total_tokens for r in runs), _cost(runs))
+
+    all_workers = [r for runs in worker_runs.values() for r in runs]
+    print("\nCost:")
+    print(runs_row("orchestrator", [result]))
+    for name, runs in worker_runs.items():
+        print(runs_row(name, runs))
+    print(runs_row("workers", all_workers))
+    print(row("total", None, result.cumulative_usage.total_tokens, result.cumulative_cost_usd))
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -108,6 +145,9 @@ def main() -> int:
     if args.worker_model == "auto":
         worker_auto = {"auto_presets": ["quick", "standard"], "auto_fallback": "quick"}
 
+    # Each worker's runs, recorded by its reporter, for the cost breakdown.
+    worker_runs: dict[str, list[RunResult]] = {"explorer": [], "runner": []}
+
     def worker(name: str, system_prompt: str, tools: list, max_turns: int) -> Agent:
         return Agent(
             provider=args.worker_provider,
@@ -118,10 +158,8 @@ def main() -> int:
             tools=tools,
             work_dir=args.repo,
             max_turns=max_turns,
-            # Workers may run concurrently: prefix their lines and keep them
-            # short; the orchestrator's summary includes their usage and cost.
-            reporter=ConsoleReporter(prefix=f"    │ {name}: ", show_tool_results=False,
-                                     show_summary=False),
+            # Workers may run concurrently: prefix their lines and keep them short.
+            reporter=WorkerReporter(name, worker_runs[name]),
         )
 
     explorer = worker("explorer", EXPLORER_PROMPT, READ_ONLY_TOOLS, max_turns=25)
@@ -148,7 +186,8 @@ def main() -> int:
         ],
         work_dir=args.repo,
         max_turns=20,
-        reporter=ConsoleReporter(max_result_lines=6),
+        # The cost table below replaces the generic summary.
+        reporter=ConsoleReporter(max_result_lines=6, show_summary=False),
     )
 
     print(f"Orchestrator: {orchestrator.model_config.provider}/{orchestrator.model} "
@@ -158,6 +197,9 @@ def main() -> int:
         workers += f" among {explorer.auto_presets}, fallback {explorer.auto_fallback}"
     print(f"Workers:      {workers} ({explorer.model_config.source})\n")
     result = orchestrator.run_sync(args.task)
+    if not result.success:
+        print(f"\nOrchestrator stopped: {result.subtype}")
+    print_costs(result, worker_runs)
     return 0 if result.success else 1
 
 
