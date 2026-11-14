@@ -25,7 +25,8 @@ model = "qwen3-coder"
 max_turns = 60
 base_url = "http://vllm.internal:8001/v1"
 
-# standard / thorough keep their defaults (gpt-5 on OPENAI_BASE_URL / api.openai.com).
+# standard / thorough keep their defaults (gpt-6.1-sol / gpt-6-astra, on
+# OPENAI_BASE_URL or api.openai.com).
 
 # Claude models through a gateway:
 # [claude.standard]

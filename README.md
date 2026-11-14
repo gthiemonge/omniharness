@@ -48,7 +48,7 @@ def lookup_ticket(ticket_id: str) -> dict:
 
 agent = Agent(
     provider="claude",              # or "openai"; default: $AGENT_PROVIDER, then claude
-    preset="standard",              # or model="claude-sonnet-5"
+    preset="standard",              # or model="claude-sonnet-5-5"
     system_prompt="You are a support engineer.",
     tools=[*READ_ONLY_TOOLS, lookup_ticket],
     work_dir="~/src/myproject",
@@ -63,7 +63,7 @@ From async code, use `await agent.run(prompt)`.
 
 ```bash
 omniharness "What does this project do?" --tools Read,Grep,Glob
-omniharness --provider openai --model gpt-5-mini -q "Name 3 prime numbers"
+omniharness --provider openai --model gpt-6-luna -q "Name 3 prime numbers"
 omniharness --skill examples/skills/changelog --work-dir ~/src/octavia --output-dir out "since 14.0.0"
 git diff | omniharness - --system "Review this diff for bugs." --json
 omniharness --list-presets
@@ -249,9 +249,9 @@ d1 runs locally in llama-server and answers in under a second on CPU (about
 
 | d1 option | for | preset | claude | openai |
 |---|---|---|---|---|
-| fast | lookups, listing, running commands and reporting results, short or mechanical tasks | `quick` | claude-haiku-4-5 | gpt-5-mini |
-| capable | explaining, writing or changing code, comparing options, multi-step analysis | `standard` | claude-sonnet-5 | gpt-5 |
-| expert | open-ended design, subtle concurrency or correctness reasoning, deep expertise | `thorough` | claude-opus-5-5 | gpt-5 |
+| fast | lookups, listing, running commands and reporting results, short or mechanical tasks | `quick` | claude-haiku-5-5 | gpt-6-luna |
+| capable | explaining, writing or changing code, comparing options, multi-step analysis | `standard` | claude-sonnet-5-5 | gpt-6.1-sol |
+| expert | open-ended design, subtle concurrency or correctness reasoning, deep expertise | `thorough` | claude-opus-5-5 | gpt-6-astra |
 
 Each agent sets its own limits; all agents share one router and one server:
 

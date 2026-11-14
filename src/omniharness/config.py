@@ -44,19 +44,19 @@ from pathlib import Path
 # endpoint: adjust these, or pass your own to resolve_model().
 DEFAULT_PRESETS: dict[str, dict[str, dict]] = {
     "claude": {
-        "quick": {"model": "claude-haiku-4-5", "max_turns": 30,
+        "quick": {"model": "claude-haiku-5-5", "max_turns": 30,
                   "description": "Fast and cheap"},
-        "standard": {"model": "claude-sonnet-5", "max_turns": 50,
+        "standard": {"model": "claude-sonnet-5-5", "max_turns": 50,
                      "description": "Balanced default"},
         "thorough": {"model": "claude-opus-5-5", "max_turns": 75,
                      "description": "Deepest reasoning, highest cost"},
     },
     "openai": {
-        "quick": {"model": "gpt-5-mini", "max_turns": 30,
+        "quick": {"model": "gpt-6-luna", "max_turns": 30,
                   "description": "Fast and cheap"},
-        "standard": {"model": "gpt-5", "max_turns": 50,
+        "standard": {"model": "gpt-6.1-sol", "max_turns": 50,
                      "description": "Balanced default"},
-        "thorough": {"model": "gpt-5", "max_turns": 75,
+        "thorough": {"model": "gpt-6-astra", "max_turns": 75,
                      "description": "Deepest reasoning, highest cost"},
     },
 }

@@ -135,7 +135,7 @@ async def test_claude_provider_maps_tools_and_messages(monkeypatch):
 
     monkeypatch.setattr(sdk, "query", fake_query)
     reporter = RecordingReporter()
-    agent = Agent(provider="claude", model="claude-sonnet-5", tools=["Read", "Bash", add],
+    agent = Agent(provider="claude", model="claude-sonnet-5-5", tools=["Read", "Bash", add],
                   reporter=reporter, effort="high")
     result = await agent.run("1+2")
 

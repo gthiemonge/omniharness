@@ -11,14 +11,14 @@ def clean_env(monkeypatch):
 
 def test_resolve_defaults():
     cfg = resolve_model()
-    assert (cfg.provider, cfg.model, cfg.max_turns) == ("claude", "claude-sonnet-5", 50)
+    assert (cfg.provider, cfg.model, cfg.max_turns) == ("claude", "claude-sonnet-5-5", 50)
 
 
 def test_resolve_precedence(monkeypatch):
     monkeypatch.setenv("AGENT_PROVIDER", "openai")
     monkeypatch.setenv("AGENT_PRESET", "quick")
-    assert resolve_model().model == "gpt-5-mini"
-    assert resolve_model(preset="standard").model == "gpt-5"
+    assert resolve_model().model == "gpt-6-luna"
+    assert resolve_model(preset="standard").model == "gpt-6.1-sol"
     monkeypatch.setenv("AGENT_MODEL", "my-model")
     assert resolve_model(preset="standard").model == "my-model"
     assert resolve_model(model="explicit").model == "explicit"

@@ -3,7 +3,7 @@ omniharness command line.
 
     omniharness "Summarize this repo" --tools Read,Grep,Glob
     omniharness --skill examples/skills/changelog --work-dir ~/src/proj "last 20 commits"
-    echo "What is 2+2?" | omniharness - --provider openai --model gpt-5-mini
+    echo "What is 2+2?" | omniharness - --provider openai --model gpt-6-luna
     omniharness --model auto --llama-server ~/llama.cpp/build/bin/llama-server "..."
 
 Every environment variable the harness reads has a flag here, except

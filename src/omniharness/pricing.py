@@ -14,7 +14,13 @@ OPENAI_PRICE_INPUT / OPENAI_PRICE_OUTPUT environment variables.
 
 from .result import Usage
 
+# OpenAI's standard-tier list prices, November 2026.
 PRICING: dict[str, dict[str, float]] = {
+    "gpt-6-astra": {"input": 10.00, "output": 50.00, "cached_input": 1.00},
+    "gpt-6.1-sol": {"input": 2.00, "output": 10.00, "cached_input": 0.10},
+    "gpt-6.1-terra": {"input": 1.00, "output": 5.00, "cached_input": 0.05},
+    "gpt-6-luna": {"input": 0.10, "output": 0.50, "cached_input": 0.01},
+    # Previous generation.
     "gpt-5": {"input": 1.25, "output": 10.00, "cached_input": 0.125},
     "gpt-5-mini": {"input": 0.25, "output": 2.00, "cached_input": 0.025},
 }

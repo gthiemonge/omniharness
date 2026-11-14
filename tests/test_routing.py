@@ -184,7 +184,7 @@ def test_resolve_auto(monkeypatch):
     assert resolve_model(preset="auto").model == "auto"
     monkeypatch.setenv("AGENT_PRESET", "auto")
     assert resolve_model().model == "auto"
-    assert resolve_model(preset="quick").model == "claude-haiku-4-5"
+    assert resolve_model(preset="quick").model == "claude-haiku-5-5"
 
 
 # ── Agent ──────────────────────────────────────────────────────────────────
@@ -219,9 +219,9 @@ async def test_agent_routes_each_run(d1_url):
     easy = await agent.run("What is 2+2? [pick:fast]")
     hard = await agent.run("Design a consensus protocol [pick:expert]")
 
-    assert responses.models == ["gpt-5-mini", "gpt-5"]
-    assert easy.final_text == "gpt-5-mini" and easy.route.preset == "quick"
-    assert easy.route.model == "gpt-5-mini" and easy.route.source == "d1"
+    assert responses.models == ["gpt-6-luna", "gpt-6-astra"]
+    assert easy.final_text == "gpt-6-luna" and easy.route.preset == "quick"
+    assert easy.route.model == "gpt-6-luna" and easy.route.source == "d1"
     assert hard.route.preset == "thorough"
 
 
@@ -235,7 +235,7 @@ async def test_agent_auto_presets_limit_and_fallback(d1_url):
     down, responses = _auto_agent(D1Router("http://127.0.0.1:9", request_timeout=2),
                                   auto_presets=["quick", "standard"], auto_fallback="quick")
     result = await down.run("anything")
-    assert result.route.source == "fallback" and responses.models == ["gpt-5-mini"]
+    assert result.route.source == "fallback" and responses.models == ["gpt-6-luna"]
 
 
 def test_agent_auto_settings_are_checked():
@@ -245,7 +245,7 @@ def test_agent_auto_settings_are_checked():
     with pytest.raises(ValueError, match="auto_fallback 'thorough' is not in"):
         _auto_agent(router, auto_presets=["quick", "standard"], auto_fallback="thorough")
     with pytest.raises(ValueError, match="need model='auto'"):
-        Agent(provider=OpenAIProvider(client=object()), model="gpt-5", auto_presets=["quick"])
+        Agent(provider=OpenAIProvider(client=object()), model="gpt-6.1-sol", auto_presets=["quick"])
     # Presets the provider lacks are left out.
     agent, _ = _auto_agent(router, presets={"openai": {"quick": {"model": "m"}}})
     assert agent.auto_presets == ["quick"]
@@ -261,7 +261,7 @@ async def test_max_turns_from_routed_preset_unless_explicit():
 async def test_fallback_is_noted_on_result():
     agent, responses = _auto_agent(D1Router("http://127.0.0.1:9", request_timeout=2))
     result = await agent.run("hi")
-    assert responses.models == ["gpt-5"]
+    assert responses.models == ["gpt-6.1-sol"]
     assert result.success and result.route.source == "fallback"
     assert "fell back to preset 'standard'" in result.notes[0]
 
@@ -271,7 +271,7 @@ async def test_auto_subagent_routes_per_task(d1_url):
     tool = worker.as_tool("worker", "Does work.")
     await tool.ainvoke({"task": "list files [pick:fast]"}, None)
     await tool.ainvoke({"task": "audit the architecture [pick:capable]"}, None)
-    assert responses.models == ["gpt-5-mini", "gpt-5"]
+    assert responses.models == ["gpt-6-luna", "gpt-6.1-sol"]
 
 
 async def test_explicit_model_never_routes():
@@ -280,7 +280,7 @@ async def test_explicit_model_never_routes():
             raise AssertionError("routed")
 
     responses = EchoResponses()
-    agent = Agent(provider=OpenAIProvider(client=NS(responses=responses)), model="gpt-5",
+    agent = Agent(provider=OpenAIProvider(client=NS(responses=responses)), model="gpt-6.1-sol",
                   router=Boom("quick"), reporter=Reporter())
     result = await agent.run("hi")
-    assert not agent.auto and result.route is None and responses.models == ["gpt-5"]
+    assert not agent.auto and result.route is None and responses.models == ["gpt-6.1-sol"]

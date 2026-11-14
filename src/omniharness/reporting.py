@@ -109,7 +109,7 @@ class ConsoleReporter(Reporter):
 
 
 def format_route(decision: RouteDecision) -> str:
-    """e.g. "quick -> claude-haiku-4-5 (d1: fast 0.93, 712 ms)"."""
+    """e.g. "quick -> claude-haiku-5-5 (d1: fast 0.93, 712 ms)"."""
     head = f"{decision.preset} -> {decision.model or '?'}"
     if decision.source == "fallback":
         return f"{head} (fallback: {decision.reason})"

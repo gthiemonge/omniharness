@@ -53,7 +53,7 @@ def test_file_merges_over_defaults(hosted):
     assert presets["openai"]["coder"]["max_turns"] == 60
     assert presets["openai"]["standard"] == DEFAULT_PRESETS["openai"]["standard"]
     assert presets["claude"] == DEFAULT_PRESETS["claude"]
-    assert DEFAULT_PRESETS["openai"]["quick"]["model"] == "gpt-5-mini"  # not mutated
+    assert DEFAULT_PRESETS["openai"]["quick"]["model"] == "gpt-6-luna"  # not mutated
     assert load_presets(hosted, base={})["openai"].keys() == {"quick", "coder"}
 
 
@@ -136,7 +136,7 @@ def test_auto_switches_endpoint_with_the_routed_preset(hosted, monkeypatch):
         model, _, provider, _ = asyncio.run(agent._select_model("x"))
         picks[preset] = (model, provider.base_url)
     assert picks == {"quick": ("Qwen/Qwen3-32B", "http://vllm.internal:8000/v1"),
-                     "standard": ("gpt-5", None)}
+                     "standard": ("gpt-6.1-sol", None)}
 
 
 def test_agent_model_env_auto_routes_to_real_models(monkeypatch):
@@ -145,7 +145,7 @@ def test_agent_model_env_auto_routes_to_real_models(monkeypatch):
     agent = _agent(router=FixedRouter("quick"))
     assert agent.auto
     model, max_turns, _, decision = asyncio.run(agent._select_model("x"))
-    assert (model, max_turns, decision.model) == ("gpt-5-mini", 30, "gpt-5-mini")
+    assert (model, max_turns, decision.model) == ("gpt-6-luna", 30, "gpt-6-luna")
 
 
 # ── CLI ────────────────────────────────────────────────────────────────────

@@ -20,7 +20,7 @@ calls at once.
     # Mix providers: Claude orchestrator, OpenAI(-compatible) workers
     python examples/06_subagents.py . --worker-provider openai --worker-preset quick
     # Pick exact models per tier (overrides the presets)
-    python examples/06_subagents.py . --orchestrator-model claude-opus-5-5 --worker-model claude-sonnet-5
+    python examples/06_subagents.py . --orchestrator-model claude-opus-5-5 --worker-model claude-sonnet-5-5
     # Let the local d1 decision model pick each worker task's model, between
     # quick and standard (see 07_auto_model.py)
     python examples/06_subagents.py . --worker-model auto
