@@ -1,0 +1,11 @@
+# Only pyproject.toml, README.md, src/, examples/, evals/ and scripts/ are copied.
+.git
+third_party
+.venv
+venv
+out
+**/__pycache__
+**/*.egg-info
+.pytest_cache
+.ruff_cache
+tests

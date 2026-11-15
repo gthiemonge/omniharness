@@ -337,6 +337,55 @@ python examples/07_auto_model.py --rate-only "..."     # one-off prompts
 - **Other routers**: subclass `Router` (`tier_order` and an async `route()`
   returning a `RouteDecision`). `FixedRouter("quick")` is handy in tests.
 
+## Container
+
+`Containerfile` builds an image with omniharness, both provider SDKs, and a
+portable llama-server (llama.cpp v0.8.0, built with every CPU variant) for
+`model="auto"`. The container is also a sandbox: `Bash` and `Write` only reach
+what you mount.
+
+```bash
+podman build -t omniharness .
+
+# Once: download the d1 model (1.7 GB) into a volume, with the image's hf CLI
+podman volume create agent-hf
+podman run --rm --userns=keep-id -v agent-hf:/home/agent/.cache/huggingface:Z \
+    --entrypoint hf omniharness download LiquidAI/d1-2B-GGUF d1-2B-Q8_0.gguf
+
+# Run an agent on the current directory
+podman run --rm -it --userns=keep-id -e ANTHROPIC_API_KEY \
+    -v agent-hf:/home/agent/.cache/huggingface:Z -v "$PWD:/work:Z" \
+    omniharness --model auto --tools Read,Grep,Glob "What does this project do?"
+```
+
+- **Your project** is mounted on `/work`, the working directory. With
+  `--userns=keep-id`, files the agent writes belong to you on the host.
+- **Credentials** are passed by name with `-e`, so their values don't appear
+  on the command line: `-e ANTHROPIC_API_KEY`, `-e OPENAI_API_KEY`,
+  `-e OPENAI_BASE_URL`, and so on. The image doesn't contain your Claude Code
+  login. Mounting `~/.claude` would provide it, but it would also bring your
+  Claude Code settings and hooks into every agent.
+- **Hosted models:** mount a presets file and point to it, e.g.
+  `-v ./presets.toml:/presets.toml:Z,ro -e AGENT_PRESETS=/presets.toml -e VLLM_API_KEY`.
+  To reach a server on the host itself, use `http://host.containers.internal:PORT/v1`
+  as its `base_url`.
+- **The examples and the routing eval** are in `/opt/omniharness`:
+
+  ```bash
+  podman run --rm -it --userns=keep-id -e ANTHROPIC_API_KEY \
+      -v agent-hf:/home/agent/.cache/huggingface:Z -v "$PWD:/work:Z" \
+      --entrypoint python omniharness \
+      /opt/omniharness/examples/06_subagents.py /work --worker-model auto
+  ```
+
+- **d1 runs inside the container.** The router starts llama-server the first
+  time it's needed (a few seconds) and stops it when the run ends. To share
+  one d1 server across many runs, start a llama-server yourself and pass
+  `-e D1_URL=http://host.containers.internal:8080`.
+- **Build options:** `--build-arg LLAMA_CPP_REF=v0.9.0` uses another
+  llama.cpp release (v0.8.0 or later), and `--build-arg FEDORA_VERSION=...`
+  changes the base image.
+
 ## Progress reporting
 
 `ConsoleReporter` (the default) prints assistant text, a one-line summary of
@@ -427,4 +476,5 @@ src/omniharness/
   tools/              base.py (@tool, ToolRegistry), builtin.py (Read/Bash/...)
 evals/routing.jsonl   labelled prompts for model="auto"
 scripts/              routing_eval.py: check routing against them with the real d1
+Containerfile         image with omniharness and llama-server (see Container)
 ```
