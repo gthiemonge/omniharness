@@ -70,6 +70,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--base-url", help="Custom API endpoint for the provider (env "
                    "ANTHROPIC_BASE_URL for claude, OPENAI_BASE_URL for openai).")
     p.add_argument("--openai-org", help="OpenAI organization id (env OPENAI_ORG).")
+    p.add_argument("--openai-api", choices=["auto", "responses", "chat"],
+                   help="Wire format of the openai provider: responses (/v1/responses), "
+                        "chat (/v1/chat/completions), or auto: responses, falling back to "
+                        "chat when the server lacks it (default).")
     p.add_argument("--openai-price-input", type=float, help="OpenAI input price, USD per "
                    "1M tokens, for cost reporting (env OPENAI_PRICE_INPUT).")
     p.add_argument("--openai-price-output", type=float, help="OpenAI output price, USD per "
@@ -127,7 +131,7 @@ def main(argv=None) -> int:
     # else to the only provider in play (the Agent rejects it if ambiguous).
     provider_options: dict = {}
     openai_only = {"organization": args.openai_org, "price_input": args.openai_price_input,
-                   "price_output": args.openai_price_output}
+                   "price_output": args.openai_price_output, "api": args.openai_api}
     openai_only = {k: v for k, v in openai_only.items() if v is not None}
     if openai_only:
         provider_options["openai"] = openai_only

@@ -9,7 +9,7 @@ The harness runs it on either backend:
 | Provider | Backend | Agent loop | Built-in tools | Your Python tools |
 |----------|---------|------------|----------------|-------------------|
 | `claude` | [Claude Agent SDK](https://pypi.org/project/claude-agent-sdk/) (Anthropic API, Vertex AI, Bedrock) | SDK | SDK-native `Read`/`Write`/`Bash`/`Grep`/`Glob`/`WebFetch` | in-process MCP server |
-| `openai` | OpenAI Responses API, or any compatible endpoint (Azure, litellm, vLLM, Ollama, ...) | harness | Python versions with the same names | called directly |
+| `openai` | OpenAI, or any compatible endpoint (Azure, litellm, vLLM, llama.cpp, Ollama, LM Studio, ...), over the Responses or Chat Completions API | harness | Python versions with the same names | called directly |
 
 Both providers return the same `RunResult`: success, final text, normalized
 token usage, and cost.
@@ -172,9 +172,15 @@ agent = Agent(provider="openai", preset="quick", profiles=load_profiles("my-prof
 - **Python:** `load_profiles(path)` returns the merged table;
   `load_profiles(path, base={})` uses the file alone. `Agent(profiles=...)` takes
   a whole table.
-- **The server must implement `/v1/responses`.** Tested with llama.cpp
-  v0.8.0's `llama-server --jinja` serving Qwen2.5-1.5B-Instruct: plain answers,
-  tool calls, key checking (a wrong key gets a 401) and cost reporting.
+- **Responses or Chat Completions:** the openai provider speaks both
+  `/v1/responses` and `/v1/chat/completions`. With the default `api = "auto"`,
+  it tries Responses first; if a server answers 404, 405 or 501, that endpoint
+  switches to Chat Completions for the rest of the process, and the run's
+  `RunResult.notes` says so. Set `api = "chat"` or `api = "responses"` on a
+  preset (or `--openai-api`) to skip the probe. Tested with llama.cpp v0.8.0's
+  `llama-server --jinja` serving Qwen2.5-1.5B-Instruct over both APIs, and
+  behind a proxy that only offers Chat Completions: answers, tool calls, key
+  checking (a wrong key gets a 401) and cost reporting.
 
 ### Profiles: mixing providers and local models
 

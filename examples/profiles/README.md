@@ -23,9 +23,10 @@ AGENT_PROFILES=examples/profiles/local-llama-server.toml AGENT_PROFILE=local \
 
 - **One file at a time:** `--profiles` takes a single file, but a file can hold
   several profiles, like `hybrid.toml`.
-- **Local servers** must speak the OpenAI Responses API (`/v1/responses`):
-  llama.cpp v0.8.0+ with `--jinja`, vLLM, litellm. Servers that only offer
-  `/v1/chat/completions` aren't supported yet.
+- **Local servers** need an OpenAI-compatible API: `/v1/responses` or
+  `/v1/chat/completions`. By default the harness tries the first and falls
+  back to the second; `api = "chat"` on a preset skips the probe. llama.cpp
+  needs `--jinja` for tool calls.
 - **Models for agents:** pick models trained for tool calls (Qwen3, ...).
   Small ones (under ~8B) often stop before a multi-step task is done.
 - **Prices of 0** make local runs report $0 instead of "cost unknown".

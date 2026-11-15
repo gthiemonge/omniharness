@@ -80,7 +80,8 @@ AUTO = "auto"
 # Preset fields, besides the model, that configure the provider for that preset.
 ENDPOINT_FIELDS: dict[str, set[str]] = {
     "claude": {"base_url"},
-    "openai": {"base_url", "api_key_env", "organization", "price_input", "price_output"},
+    "openai": {"base_url", "api_key_env", "organization", "price_input", "price_output",
+               "api"},
 }
 PRESET_FIELDS = {"provider", "model", "max_turns", "description"}
 

@@ -5,12 +5,13 @@
 #   Agent(profiles=load_profiles("my-profiles.toml"), ...)
 #
 # Fields: model, max_turns, description, and the endpoint of that preset:
-#   openai: base_url, api_key_env, organization, price_input, price_output
+#   openai: base_url, api_key_env, organization, price_input, price_output,
+#           api ("auto" | "responses" | "chat": the wire format, default auto)
 #   claude: base_url
 # A preset with its own base_url never gets OPENAI_API_KEY: name the variable
 # holding its key with api_key_env, or it sends the placeholder "EMPTY".
 
-# Cheap tier on a self-hosted model (vLLM, llama.cpp, TGI, ... with /v1/responses).
+# Cheap tier on a self-hosted model (vLLM, llama.cpp, TGI, LM Studio, ...).
 [openai.quick]
 model = "Qwen/Qwen3-32B"
 base_url = "http://vllm.internal:8000/v1"

@@ -9,8 +9,9 @@
 # --jinja is required: it enables the chat templates that carry tool calls.
 # llama-server serves one model per process; `model` is only a label then.
 # Prices of 0 make cost reports say $0 instead of "unknown".
-# Agents still need llama.cpp v0.8.0+ (for /v1/responses) and a model trained
-# for tool calls; small models (under ~8B) often stop before finishing a task.
+# llama.cpp serves both /v1/responses (v0.8.0+) and /v1/chat/completions; the
+# harness picks automatically. Agents need a model trained for tool calls;
+# small models (under ~8B) often stop before finishing a task.
 
 [profiles.local]
 quick = { provider = "openai", model = "qwen3-8b", base_url = "http://localhost:8080/v1", max_turns = 30, price_input = 0, price_output = 0, description = "Qwen3 8B, local" }
