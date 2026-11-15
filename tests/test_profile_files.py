@@ -141,7 +141,7 @@ def test_auto_switches_endpoint_with_the_routed_preset(hosted, monkeypatch):
     picks = {}
     for preset in ("quick", "standard"):
         agent = _agent(model="auto", profiles=presets, router=FixedRouter(preset))
-        model, _, provider, _ = asyncio.run(agent._select_model("x"))
+        model, _, provider, _, _ = asyncio.run(agent._select_model("x"))
         picks[preset] = (model, provider.base_url)
     assert picks == {"quick": ("Qwen/Qwen3-32B", "http://vllm.internal:8000/v1"),
                      "standard": ("gpt-6.1-sol", None)}
@@ -152,7 +152,7 @@ def test_agent_model_env_auto_routes_to_real_models(monkeypatch):
     monkeypatch.setenv("AGENT_MODEL", "auto")
     agent = _agent(router=FixedRouter("quick"))
     assert agent.auto
-    model, max_turns, _, decision = asyncio.run(agent._select_model("x"))
+    model, max_turns, _, decision, _ = asyncio.run(agent._select_model("x"))
     assert (model, max_turns, decision.model) == ("gpt-6-luna", 30, "gpt-6-luna")
 
 

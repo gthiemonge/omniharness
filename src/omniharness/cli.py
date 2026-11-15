@@ -44,7 +44,8 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--profiles", metavar="FILE", help="TOML or JSON file of profiles, merged "
                    "over the built-in ones; a preset can set its own base_url, "
                    "api_key_env, ... (env AGENT_PROFILES).")
-    p.add_argument("--effort", help="Reasoning effort: low, medium, high (env AGENT_EFFORT).")
+    p.add_argument("--effort", help="Reasoning effort, e.g. low, medium, high (default: the "
+                   "preset's effort, then env AGENT_EFFORT).")
     p.add_argument("--max-turns", type=int, help="Maximum agent turns.")
     p.add_argument("--tools", default="",
                    help=f"Comma-separated built-in tools ({','.join(BUILTIN_TOOLS)}), "

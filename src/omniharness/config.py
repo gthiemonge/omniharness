@@ -83,7 +83,7 @@ ENDPOINT_FIELDS: dict[str, set[str]] = {
     "openai": {"base_url", "api_key_env", "organization", "price_input", "price_output",
                "api"},
 }
-PRESET_FIELDS = {"provider", "model", "max_turns", "description"}
+PRESET_FIELDS = {"provider", "model", "max_turns", "description", "effort"}
 
 
 @dataclass
@@ -97,6 +97,8 @@ class ModelConfig:
     endpoint: dict = field(default_factory=dict)
     # The profile the presets come from.
     profile: str | None = None
+    # The preset's reasoning effort, if it sets one.
+    effort: str | None = None
 
 
 def resolve_model(
@@ -167,6 +169,7 @@ def preset_config(profile: str, preset: str, profiles: dict[str, dict[str, dict]
         source,
         {k: v for k, v in p.items() if k not in PRESET_FIELDS},
         profile,
+        p.get("effort"),
     )
 
 
@@ -332,6 +335,8 @@ def format_profiles(profiles: dict[str, dict[str, dict]] | None = None) -> str:
                 model = f"{cfg['provider']}/{model}"
             line = (f"  {name:10s} {model:28s} max_turns={cfg.get('max_turns', DEFAULT_MAX_TURNS)}"
                     f"  {cfg.get('description', '')}")
+            if cfg.get("effort"):
+                line = f"{line.rstrip()}  effort={cfg['effort']}"
             if cfg.get("base_url"):
                 line = f"{line.rstrip()}  @ {cfg['base_url']}"
             lines.append(line)

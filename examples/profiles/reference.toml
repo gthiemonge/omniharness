@@ -4,7 +4,7 @@
 #   AGENT_PROFILES=my-profiles.toml python examples/06_subagents.py . --worker-model auto
 #   Agent(profiles=load_profiles("my-profiles.toml"), ...)
 #
-# Fields: model, max_turns, description, and the endpoint of that preset:
+# Fields: model, max_turns, description, effort, and the endpoint of that preset:
 #   openai: base_url, api_key_env, organization, price_input, price_output,
 #           api ("auto" | "responses" | "chat": the wire format, default auto)
 #   claude: base_url

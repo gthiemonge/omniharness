@@ -104,7 +104,7 @@ and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
 | provider | `Agent(provider=)` | `--provider` | `AGENT_PROVIDER` | `claude` |
 | model | `Agent(model=)` | `--model` | `AGENT_MODEL` | preset's model |
 | preset | `Agent(preset=)` | `--preset` | `AGENT_PRESET` | `standard` |
-| effort | `Agent(effort=)` | `--effort` | `AGENT_EFFORT` | provider default |
+| effort | `Agent(effort=)` | `--effort` | `AGENT_EFFORT` | the preset's `effort`, else provider default |
 | endpoint (claude) | `provider_options={"base_url": ...}` | `--base-url` | `ANTHROPIC_BASE_URL` | Anthropic API |
 | endpoint (openai) | `provider_options={"base_url": ...}` | `--base-url` | `OPENAI_BASE_URL` | api.openai.com |
 | OpenAI organization | `provider_options={"organization": ...}` | `--openai-org` | `OPENAI_ORG` | none |
@@ -156,8 +156,8 @@ from omniharness import Agent, load_profiles
 agent = Agent(provider="openai", preset="quick", profiles=load_profiles("my-profiles.toml"))
 ```
 
-- **Fields:** `model`, `max_turns` and `description`, plus the preset's
-  endpoint. For `openai` that's `base_url`, `api_key_env`, `organization`,
+- **Fields:** `model`, `max_turns`, `description` and `effort`, plus the
+  preset's endpoint. For `openai` that's `base_url`, `api_key_env`, `organization`,
   `price_input` and `price_output`; for `claude`, `base_url` only. Anything
   else is rejected, as is a literal `api_key`.
 - **Keys:** a preset with its own `base_url` never gets `OPENAI_API_KEY`, so
@@ -211,6 +211,13 @@ AGENT_PROFILES=my-profiles.toml AGENT_PROFILE=offline python examples/06_subagen
   `--provider` / `AGENT_PROVIDER`, else `claude`. A preset brings its
   provider, model and endpoint. An explicit `--model` runs on the profile's
   `standard` preset's provider, unless `--provider` says otherwise.
+- **Effort per preset:** `effort = "low"` / `"xhigh"` / ... on a preset is
+  used for its runs; with `auto`, each run takes the routed preset's effort.
+  An explicit `effort=` / `--effort` wins; a preset's effort wins over
+  `AGENT_EFFORT`, which only fills in for presets without one (unlike
+  `AGENT_MODEL`, which overrides presets). Values go to the provider as is:
+  Claude takes `low` to `max`, OpenAI its reasoning levels; leave it unset for
+  servers that reject it.
 - **With `model="auto"`,** d1 picks the tier and the tier picks the provider.
   With `hybrid`, a lookup goes to the local model and a design question to
   Claude Opus. `auto_presets` limits the tiers as usual.

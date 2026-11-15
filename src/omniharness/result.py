@@ -83,6 +83,7 @@ class RouteDecision:
     reason: str | None = None
     # Filled in by the Agent once the preset is resolved.
     model: str = ""
+    effort: str | None = None
 
     @property
     def clamped(self) -> bool:

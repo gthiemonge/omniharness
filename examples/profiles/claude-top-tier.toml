@@ -9,10 +9,12 @@
 
 [claude.thorough]
 model = "claude-fable-5-2"
+effort = "high"
 max_turns = 100
 description = "Claude Fable 5.2: most capable"
 
 [claude.max]
 model = "claude-fable-5-2"
+effort = "max"
 max_turns = 200
 description = "Claude Fable 5.2, long tasks"

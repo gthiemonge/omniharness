@@ -23,7 +23,7 @@ thorough = { provider = "openai", model = "qwen3-32b", base_url = "http://gpu-bo
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
     for var in ("AGENT_PROVIDER", "AGENT_MODEL", "AGENT_PRESET", "AGENT_PROFILES",
-                "AGENT_PROFILE", "OPENAI_BASE_URL"):
+                "AGENT_PROFILE", "AGENT_EFFORT", "OPENAI_BASE_URL"):
         monkeypatch.delenv(var, raising=False)
 
 
@@ -112,7 +112,7 @@ def test_auto_routes_across_providers(presets):
     picks = {}
     for preset in ("quick", "standard", "thorough"):
         agent = _agent(presets, profile="hybrid", model="auto", router=FixedRouter(preset))
-        model, _, provider, decision = asyncio.run(agent._select_model("x"))
+        model, _, provider, decision, _ = asyncio.run(agent._select_model("x"))
         picks[preset] = (provider.name, model, decision.model)
     assert picks == {
         "quick": ("openai", "qwen3-8b", "qwen3-8b"),
@@ -140,10 +140,10 @@ def test_keyed_options_go_to_their_provider(presets):
     agent = _agent(presets, profile="hybrid", model="auto", router=FixedRouter("quick"),
                    provider_options={"openai": {"price_input": 0.0, "price_output": 0.0},
                                      "claude": {"base_url": "https://gw/anthropic"}})
-    _, _, quick, _ = asyncio.run(agent._select_model("x"))
+    _, _, quick, _, _ = asyncio.run(agent._select_model("x"))
     assert (quick.price_input, quick.base_url) == (0.0, "http://localhost:8080/v1")
     agent.router = FixedRouter("standard")
-    _, _, standard, _ = asyncio.run(agent._select_model("x"))
+    _, _, standard, _, _ = asyncio.run(agent._select_model("x"))
     assert standard.base_url == "https://gw/anthropic"
 
 
@@ -173,3 +173,75 @@ def test_cli_profile(tmp_path, monkeypatch):
     assert cli.main(["--profiles", str(path), "--profile", "hybrid", "--model", "auto",
                      "-q", "hi"]) == 0
     assert seen["profile"] == "hybrid" and "hybrid" in seen["profiles"]
+
+
+# ── effort ─────────────────────────────────────────────────────────────────
+
+EFFORT_PROFILES = """
+[profiles.tiers]
+quick = { provider = "openai", model = "small", effort = "low" }
+standard = { provider = "openai", model = "mid" }
+thorough = { provider = "claude", model = "claude-opus-5-5", effort = "xhigh" }
+"""
+
+
+@pytest.fixture
+def effort_profiles(tmp_path):
+    path = tmp_path / "effort.toml"
+    path.write_text(EFFORT_PROFILES)
+    return load_profiles(path)
+
+
+def test_effort_precedence(effort_profiles, monkeypatch):
+    def effort(**kwargs):
+        return _agent(effort_profiles, profile="tiers", **kwargs).effort
+
+    assert effort(preset="quick") == "low"
+    assert effort(preset="standard") is None  # provider default
+    monkeypatch.setenv("AGENT_EFFORT", "medium")
+    assert effort(preset="quick") == "low"  # the preset wins over AGENT_EFFORT
+    assert effort(preset="standard") == "medium"  # AGENT_EFFORT fills the gap
+    assert effort(preset="quick", effort="max") == "max"  # an explicit effort wins
+
+
+def test_auto_takes_the_routed_presets_effort(effort_profiles):
+    efforts = {}
+    for preset in ("quick", "standard", "thorough"):
+        agent = _agent(effort_profiles, profile="tiers", model="auto",
+                       router=FixedRouter(preset))
+        *_, decision, effort = asyncio.run(agent._select_model("x"))
+        assert decision.effort == effort
+        efforts[preset] = effort
+    assert efforts == {"quick": "low", "standard": None, "thorough": "xhigh"}
+
+
+async def test_effort_reaches_the_request():
+    from types import SimpleNamespace as NS
+
+    from omniharness.providers.openai_provider import OpenAIProvider
+
+    class Responses:
+        def __init__(self):
+            self.with_raw_response, self.params = self, None
+
+        async def create(self, **params):
+            self.params = params
+            response = NS(output=[NS(type="message", content=[NS(text="ok")])], usage=None)
+            return NS(parse=lambda: response, headers={})
+
+    responses = Responses()
+    agent = Agent(provider=OpenAIProvider(client=NS(responses=responses), api="responses"),
+                  profiles={"openai": {"quick": {"model": "m", "effort": "low"}}},
+                  preset="quick", reporter=Reporter())
+    await agent.run("hi")
+    assert responses.params["reasoning"] == {"effort": "low"}
+
+
+def test_effort_is_shown(effort_profiles):
+    from omniharness import RouteDecision
+    from omniharness.reporting import format_route
+
+    assert "effort=xhigh" in format_profiles(effort_profiles)
+    line = format_route(RouteDecision(preset="thorough", source="fixed",
+                                      model="claude-opus-5-5", effort="xhigh"))
+    assert line.startswith("thorough -> claude-opus-5-5 (effort xhigh)")

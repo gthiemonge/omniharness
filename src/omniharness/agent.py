@@ -79,8 +79,10 @@ class Agent:
             tools: Tool objects and/or built-in tool names ("Read", "Bash", ...).
             work_dir: Directory tools operate in. Defaults to the current one.
             max_turns: Turn cap. Defaults to the preset's value.
-            effort: Reasoning effort ("low", "medium", "high"). Defaults to
-                AGENT_EFFORT, then the provider default.
+            effort: Reasoning effort ("low", "medium", "high", ...), passed to
+                the provider as is. Defaults to the preset's effort (the routed
+                preset's with "auto"), then AGENT_EFFORT, then the provider
+                default.
             add_dirs: Extra directories the agent may access (claude provider).
             env: Extra environment variables for the agent's tools.
             reporter: Progress sink. Defaults to ConsoleReporter().
@@ -128,7 +130,9 @@ class Agent:
         elif auto_presets is not None or auto_fallback is not None:
             raise ValueError("auto_presets / auto_fallback need model='auto' or preset='auto'")
         self.max_turns = max_turns or self.model_config.max_turns
-        self.effort = effort or os.getenv("AGENT_EFFORT") or None
+        # An explicit effort wins; else each run's preset, then AGENT_EFFORT.
+        self._explicit_effort = effort
+        self.effort = self._effort_for(self.model_config)
         self.add_dirs = [os.path.abspath(os.path.expanduser(d)) for d in add_dirs]
         self.env = dict(env or {})
         self.reporter = reporter if reporter is not None else ConsoleReporter()
@@ -205,22 +209,28 @@ class Agent:
             self._providers[key] = get_provider(config.provider, **kwargs)
         return self._providers[key]
 
+    def _effort_for(self, config: ModelConfig) -> str | None:
+        return self._explicit_effort or config.effort or os.getenv("AGENT_EFFORT") or None
+
     async def _select_model(self, prompt: str
-                            ) -> tuple[str, int, Provider, RouteDecision | None]:
+                            ) -> tuple[str, int, Provider, RouteDecision | None, str | None]:
+        """The model, turn cap, provider, routing decision and effort of one run."""
         if not self.auto:
-            return self.model, self.max_turns, self.provider, None
+            return self.model, self.max_turns, self.provider, None, self.effort
         router = self.router or get_default_router()
         decision = await router.route(prompt, self.system_prompt,
                                       allowed=self.auto_presets, fallback=self.auto_fallback)
         # The preset directly, not resolve_model(): AGENT_MODEL may be "auto" itself.
         config = preset_config(self.profile, decision.preset, self.profiles)
         decision.model = config.model
+        effort = self._effort_for(config)
+        decision.effort = effort
         return (config.model, self._explicit_max_turns or config.max_turns,
-                self._provider_for(config), decision)
+                self._provider_for(config), decision, effort)
 
     async def run(self, prompt: str) -> RunResult:
         """Run one task to completion."""
-        model, max_turns, provider, decision = await self._select_model(prompt)
+        model, max_turns, provider, decision, effort = await self._select_model(prompt)
         if decision is not None:
             self.reporter.on_route(decision)
         request = RunRequest(
@@ -230,7 +240,7 @@ class Agent:
             tools=self.tools,
             work_dir=self.work_dir,
             max_turns=max_turns,
-            effort=self.effort,
+            effort=effort,
             add_dirs=self.add_dirs,
             env=self.env,
         )
