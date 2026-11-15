@@ -1,12 +1,20 @@
-"""Presets files, per-preset endpoints, and which provider/endpoint a run uses."""
+"""Profiles files, per-preset endpoints, and which provider/endpoint a run uses."""
 
 import asyncio
 import json
+from pathlib import Path
 
 import pytest
 
-from omniharness import Agent, FixedRouter, Reporter, cli
-from omniharness import DEFAULT_PRESETS, load_presets, resolve_model
+from omniharness import (
+    DEFAULT_PROFILES,
+    Agent,
+    FixedRouter,
+    Reporter,
+    cli,
+    load_profiles,
+    resolve_model,
+)
 
 HOSTED = """
 [openai.quick]
@@ -25,7 +33,7 @@ base_url = "http://vllm.internal:8001/v1"
 
 @pytest.fixture(autouse=True)
 def clean_env(monkeypatch):
-    for var in ("AGENT_PROVIDER", "AGENT_MODEL", "AGENT_PRESET", "AGENT_PRESETS",
+    for var in ("AGENT_PROVIDER", "AGENT_MODEL", "AGENT_PRESET", "AGENT_PROFILES",
                 "OPENAI_BASE_URL", "VLLM_KEY"):
         monkeypatch.delenv(var, raising=False)
     monkeypatch.setenv("OPENAI_API_KEY", "sk-real-openai-key")
@@ -33,7 +41,7 @@ def clean_env(monkeypatch):
 
 @pytest.fixture
 def hosted(tmp_path):
-    path = tmp_path / "presets.toml"
+    path = tmp_path / "profiles.toml"
     path.write_text(HOSTED)
     return path
 
@@ -46,21 +54,21 @@ def _agent(**kwargs):
 
 
 def test_file_merges_over_defaults(hosted):
-    presets = load_presets(hosted)
+    presets = load_profiles(hosted)
     quick = presets["openai"]["quick"]
     assert quick["model"] == "Qwen/Qwen3-32B"
     assert quick["max_turns"] == 30  # kept from the default preset
     assert presets["openai"]["coder"]["max_turns"] == 60
-    assert presets["openai"]["standard"] == DEFAULT_PRESETS["openai"]["standard"]
-    assert presets["claude"] == DEFAULT_PRESETS["claude"]
-    assert DEFAULT_PRESETS["openai"]["quick"]["model"] == "gpt-6-luna"  # not mutated
-    assert load_presets(hosted, base={})["openai"].keys() == {"quick", "coder"}
+    assert presets["openai"]["standard"] == DEFAULT_PROFILES["openai"]["standard"]
+    assert presets["claude"] == DEFAULT_PROFILES["claude"]
+    assert DEFAULT_PROFILES["openai"]["quick"]["model"] == "gpt-6-luna"  # not mutated
+    assert load_profiles(hosted, base={})["openai"].keys() == {"quick", "coder"}
 
 
 def test_json_file(tmp_path):
     path = tmp_path / "p.json"
     path.write_text(json.dumps({"openai": {"quick": {"model": "m", "base_url": "http://h"}}}))
-    assert load_presets(path)["openai"]["quick"]["base_url"] == "http://h"
+    assert load_profiles(path)["openai"]["quick"]["base_url"] == "http://h"
 
 
 @pytest.mark.parametrize(("text", "error"), [
@@ -73,7 +81,7 @@ def test_invalid_files(tmp_path, text, error):
     path = tmp_path / "p.toml"
     path.write_text(text)
     with pytest.raises(ValueError, match=error):
-        load_presets(path)
+        load_profiles(path)
 
 
 # ── endpoints ──────────────────────────────────────────────────────────────
@@ -81,7 +89,7 @@ def test_invalid_files(tmp_path, text, error):
 
 def test_preset_endpoint_configures_the_provider(hosted, monkeypatch):
     monkeypatch.setenv("VLLM_KEY", "vllm-secret")
-    agent = _agent(preset="quick", presets=load_presets(hosted))
+    agent = _agent(preset="quick", profiles=load_profiles(hosted))
     p = agent.provider
     assert (agent.model, p.base_url, p.api_key) == (
         "Qwen/Qwen3-32B", "http://vllm.internal:8000/v1", "vllm-secret")
@@ -89,24 +97,24 @@ def test_preset_endpoint_configures_the_provider(hosted, monkeypatch):
 
 
 def test_openai_key_never_sent_to_another_host(hosted):
-    agent = _agent(preset="coder", presets=load_presets(hosted))
+    agent = _agent(preset="coder", profiles=load_profiles(hosted))
     assert agent.provider.base_url == "http://vllm.internal:8001/v1"
     assert agent.provider.api_key == "EMPTY"
 
 
 def test_missing_api_key_env_is_an_error(hosted):
     with pytest.raises(ValueError, match="VLLM_KEY is not set"):
-        _agent(preset="quick", presets=load_presets(hosted))
+        _agent(preset="quick", profiles=load_profiles(hosted))
 
 
 def test_presets_without_endpoint_use_the_usual_settings(hosted, monkeypatch):
     monkeypatch.setenv("OPENAI_BASE_URL", "https://gw/v1")
-    agent = _agent(preset="standard", presets=load_presets(hosted))
+    agent = _agent(preset="standard", profiles=load_profiles(hosted))
     assert (agent.provider.base_url, agent.provider.api_key) == ("https://gw/v1", None)
 
 
 def test_explicit_provider_options_win(hosted):
-    agent = _agent(preset="coder", presets=load_presets(hosted),
+    agent = _agent(preset="coder", profiles=load_profiles(hosted),
                    provider_options={"base_url": "http://override/v1"})
     assert agent.provider.base_url == "http://override/v1"
 
@@ -115,11 +123,11 @@ def test_endpoint_preset_with_a_provider_instance_is_an_error(hosted):
     from omniharness.providers.openai_provider import OpenAIProvider
     with pytest.raises(ValueError, match="pass the provider by name"):
         Agent(provider=OpenAIProvider(client=object()), preset="coder",
-              presets=load_presets(hosted), reporter=Reporter())
+              profiles=load_profiles(hosted), reporter=Reporter())
 
 
 def test_agent_presets_env(hosted, monkeypatch):
-    monkeypatch.setenv("AGENT_PRESETS", str(hosted))
+    monkeypatch.setenv("AGENT_PROFILES", str(hosted))
     assert _agent(preset="coder").model == "qwen3-coder"
     assert resolve_model("openai", "coder").model == "qwen3-coder"
 
@@ -129,10 +137,10 @@ def test_agent_presets_env(hosted, monkeypatch):
 
 def test_auto_switches_endpoint_with_the_routed_preset(hosted, monkeypatch):
     monkeypatch.setenv("VLLM_KEY", "vllm-secret")
-    presets = load_presets(hosted)
+    presets = load_profiles(hosted)
     picks = {}
     for preset in ("quick", "standard"):
-        agent = _agent(model="auto", presets=presets, router=FixedRouter(preset))
+        agent = _agent(model="auto", profiles=presets, router=FixedRouter(preset))
         model, _, provider, _ = asyncio.run(agent._select_model("x"))
         picks[preset] = (model, provider.base_url)
     assert picks == {"quick": ("Qwen/Qwen3-32B", "http://vllm.internal:8000/v1"),
@@ -151,8 +159,8 @@ def test_agent_model_env_auto_routes_to_real_models(monkeypatch):
 # ── CLI ────────────────────────────────────────────────────────────────────
 
 
-def test_cli_list_presets_shows_the_file(hosted, capsys):
-    assert cli.main(["--list-presets", "--presets", str(hosted)]) == 0
+def test_cli_list_profiles_shows_the_file(hosted, capsys):
+    assert cli.main(["--list-profiles", "--profiles", str(hosted)]) == 0
     out = capsys.readouterr().out
     assert "Qwen/Qwen3-32B" in out and "@ http://vllm.internal:8000/v1" in out
     assert "coder" in out
@@ -161,12 +169,23 @@ def test_cli_list_presets_shows_the_file(hosted, capsys):
 def test_cli_bad_presets_file(tmp_path, capsys):
     path = tmp_path / "p.toml"
     path.write_text('[openai.quick]\nmodle = "x"\n')
-    assert cli.main(["--presets", str(path), "hi"]) == 1
+    assert cli.main(["--profiles", str(path), "hi"]) == 1
     assert "unknown field" in capsys.readouterr().err
 
 
-def test_example_presets_file_is_valid():
-    from pathlib import Path
-    example = Path(__file__).resolve().parent.parent / "examples" / "presets.example.toml"
-    presets = load_presets(example)
-    assert presets["openai"]["coder"]["base_url"] == "http://vllm.internal:8001/v1"
+SAMPLES = sorted((Path(__file__).resolve().parent.parent / "examples" / "profiles").glob("*.toml"))
+
+
+@pytest.mark.parametrize("path", SAMPLES, ids=lambda p: p.name)
+def test_sample_presets_files(path, monkeypatch):
+    """Every sample loads, and every profile it defines builds all its providers."""
+    for var in ("VLLM_API_KEY", "VLLM_KEY", "GATEWAY_KEY"):
+        monkeypatch.setenv(var, "test-key")
+    presets = load_profiles(path)
+    defined = {name for name in presets
+               if name not in DEFAULT_PROFILES or presets[name] != DEFAULT_PROFILES[name]}
+    assert defined, f"{path.name} changes nothing"
+    for profile in defined:
+        agent = Agent(profiles=presets, profile=profile, model="auto",
+                      router=FixedRouter("quick"), reporter=Reporter())
+        assert agent.auto_presets

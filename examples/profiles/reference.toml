@@ -1,0 +1,49 @@
+# Your own profiles and presets, merged over the built-in profiles field by field.
+#
+#   omniharness --profiles examples/profiles/reference.toml --list-profiles
+#   AGENT_PROFILES=my-profiles.toml python examples/06_subagents.py . --worker-model auto
+#   Agent(profiles=load_profiles("my-profiles.toml"), ...)
+#
+# Fields: model, max_turns, description, and the endpoint of that preset:
+#   openai: base_url, api_key_env, organization, price_input, price_output
+#   claude: base_url
+# A preset with its own base_url never gets OPENAI_API_KEY: name the variable
+# holding its key with api_key_env, or it sends the placeholder "EMPTY".
+
+# Cheap tier on a self-hosted model (vLLM, llama.cpp, TGI, ... with /v1/responses).
+[openai.quick]
+model = "Qwen/Qwen3-32B"
+base_url = "http://vllm.internal:8000/v1"
+api_key_env = "VLLM_API_KEY"
+price_input = 0.10        # USD per 1M tokens, for cost reports
+price_output = 0.30
+description = "Self-hosted Qwen3 32B"
+
+# A new preset, on another endpoint without authentication.
+[openai.coder]
+model = "qwen3-coder"
+max_turns = 60
+base_url = "http://vllm.internal:8001/v1"
+
+# standard / thorough keep their defaults (gpt-6.1-sol / gpt-6-astra, on
+# OPENAI_BASE_URL or api.openai.com).
+
+# Claude models through a gateway:
+# [claude.standard]
+# base_url = "https://llm-gateway.example.com/anthropic"
+
+# ── Profiles: each preset names its provider ──────────────────────────────
+#   omniharness --profiles my-profiles.toml --profile hybrid --model auto "..."
+
+# A local model for the cheap tier, Claude for the others.
+[profiles.hybrid]
+quick = { provider = "openai", model = "qwen3-8b", base_url = "http://localhost:8080/v1" }
+standard = { provider = "claude", model = "claude-sonnet-5-5" }
+thorough = { provider = "claude", model = "claude-opus-5-5" }
+
+# Local models only: an agent on this profile never contacts a cloud service.
+[profiles.offline]
+quick = { provider = "openai", model = "qwen3-8b", base_url = "http://localhost:8080/v1" }
+standard = { provider = "openai", model = "qwen3-32b", base_url = "http://gpu-box:8000/v1" }
+thorough = { provider = "openai", model = "qwen3-32b", base_url = "http://gpu-box:8000/v1" }
+

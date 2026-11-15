@@ -1,0 +1,18 @@
+# Offline: every tier on local llama-server instances. Nothing leaves the machine.
+#
+#   llama-server --jinja -m Qwen3-8B-Q4_K_M.gguf  --port 8080 -c 32768
+#   llama-server --jinja -m Qwen3-32B-Q4_K_M.gguf --port 8081 -c 32768   # add -ngl 99 on a GPU
+#
+#   omniharness --profiles examples/profiles/local-llama-server.toml --profile local \
+#       --preset quick --tools Read,Grep,Glob "What does this project do?"
+#
+# --jinja is required: it enables the chat templates that carry tool calls.
+# llama-server serves one model per process; `model` is only a label then.
+# Prices of 0 make cost reports say $0 instead of "unknown".
+# Agents still need llama.cpp v0.8.0+ (for /v1/responses) and a model trained
+# for tool calls; small models (under ~8B) often stop before finishing a task.
+
+[profiles.local]
+quick = { provider = "openai", model = "qwen3-8b", base_url = "http://localhost:8080/v1", max_turns = 30, price_input = 0, price_output = 0, description = "Qwen3 8B, local" }
+standard = { provider = "openai", model = "qwen3-32b", base_url = "http://localhost:8081/v1", max_turns = 50, price_input = 0, price_output = 0, description = "Qwen3 32B, local" }
+thorough = { provider = "openai", model = "qwen3-32b", base_url = "http://localhost:8081/v1", max_turns = 75, price_input = 0, price_output = 0, description = "Qwen3 32B, local" }

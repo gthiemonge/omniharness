@@ -1,0 +1,18 @@
+# Claude only, with Anthropic's most capable model for thorough work.
+#
+#   omniharness --profiles examples/profiles/claude-top-tier.toml --preset thorough "..."
+#   omniharness --profiles examples/profiles/claude-top-tier.toml --preset max "..."
+#
+# Claude Fable 5.2 costs $8 / $40 per 1M tokens, twice Opus 5.5.
+# "max" is an extra preset you pick by hand; --model auto routing only uses
+# quick / standard / thorough.
+
+[claude.thorough]
+model = "claude-fable-5-2"
+max_turns = 100
+description = "Claude Fable 5.2: most capable"
+
+[claude.max]
+model = "claude-fable-5-2"
+max_turns = 200
+description = "Claude Fable 5.2, long tasks"

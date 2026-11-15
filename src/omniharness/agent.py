@@ -15,8 +15,17 @@ import os
 from collections.abc import Sequence
 from typing import Any
 
-from .config import AUTO, ModelConfig, endpoint_kwargs, get_presets, preset_config, resolve_model
-from .providers import Provider, get_provider
+from .config import (
+    AUTO,
+    ModelConfig,
+    endpoint_kwargs,
+    get_profiles,
+    normalize_profiles,
+    preset_config,
+    profile_providers,
+    resolve_model,
+)
+from .providers import Provider, available_providers, get_provider
 from .reporting import ConsoleReporter, Reporter
 from .result import RouteDecision, RunRequest, RunResult
 from .routing import Router, get_default_router
@@ -41,6 +50,7 @@ class Agent:
         provider: str | Provider | None = None,
         model: str | None = None,
         preset: str | None = None,
+        profile: str | None = None,
         system_prompt: str = "",
         tools: Sequence[ToolSpec] = (),
         work_dir: str | None = None,
@@ -49,7 +59,7 @@ class Agent:
         add_dirs: Sequence[str] = (),
         env: dict[str, str] | None = None,
         reporter: Reporter | None = None,
-        presets: dict[str, dict[str, dict]] | None = None,
+        profiles: dict[str, dict[str, dict]] | None = None,
         provider_options: dict[str, Any] | None = None,
         router: Router | None = None,
         auto_presets: Sequence[str] | None = None,
@@ -58,9 +68,13 @@ class Agent:
         """
         Args:
             provider: "claude", "openai", a registered name, or a Provider
-                instance. Defaults to AGENT_PROVIDER, then "claude".
+                instance. Selects the profile of that name when no profile is
+                given. Defaults to AGENT_PROVIDER, then "claude".
             model: Model id. Defaults to AGENT_MODEL, then the preset's model.
             preset: Preset name ("quick", "standard", "thorough", ...).
+            profile: The set of presets to use, e.g. "hybrid" from a profiles
+                file; each preset brings its provider. Defaults to
+                AGENT_PROFILE, then the provider's own profile.
             system_prompt: Instructions for the model.
             tools: Tool objects and/or built-in tool names ("Read", "Bash", ...).
             work_dir: Directory tools operate in. Defaults to the current one.
@@ -70,11 +84,13 @@ class Agent:
             add_dirs: Extra directories the agent may access (claude provider).
             env: Extra environment variables for the agent's tools.
             reporter: Progress sink. Defaults to ConsoleReporter().
-            presets: Your own preset table (see config.DEFAULT_PRESETS and
-                load_presets()). Default: DEFAULT_PRESETS merged with the file
-                named by AGENT_PRESETS, if set.
-            provider_options: kwargs for the provider constructor when
-                `provider` is a name (e.g. {"base_url": ...} for openai).
+            profiles: Your own profiles table (see config.DEFAULT_PROFILES and
+                load_profiles()). Default: DEFAULT_PROFILES merged with the file
+                named by AGENT_PROFILES, if set.
+            provider_options: kwargs for the provider constructors, e.g.
+                {"base_url": ...}, or keyed by provider when the profile mixes
+                them: {"openai": {...}, "claude": {...}}. They win over the
+                presets' endpoints.
             router: Picks a preset per run when the model or preset is "auto".
                 Defaults to the process-wide D1Router (routing.py).
             auto_presets: With "auto", the presets this agent may get, e.g.
@@ -84,16 +100,20 @@ class Agent:
                 the router's fallback_preset, clamped to auto_presets.
         """
         provider_name = provider.name if isinstance(provider, Provider) else provider
-        self.presets = presets if presets is not None else get_presets()
+        self.profiles = normalize_profiles(profiles if profiles is not None else get_profiles())
         self.model_config: ModelConfig = resolve_model(
-            provider_name, preset, model, presets=self.presets
+            provider_name, preset, model, profile=profile, profiles=self.profiles
         )
-        # A Provider instance is used as is; a name is built per endpoint, since
-        # presets can point at different endpoints (see _provider_for).
+        self.profile = self.model_config.profile
+        # A Provider instance is used as is; names are built per provider and
+        # endpoint, since presets can differ in both (see _provider_for).
         self._fixed_provider = provider if isinstance(provider, Provider) else None
-        self._provider_options = dict(provider_options or {})
+        self._provider_options = self._split_options(provider_options, provider_name)
         self._providers: dict[str, Provider] = {}
-        self.provider = self._provider_for(self.model_config)
+        # With "auto" each run picks its preset, and so its provider: none is
+        # built up front (an offline profile must not create a cloud client).
+        self.provider: Provider | None = (
+            self._fixed_provider if self.auto else self._provider_for(self.model_config))
 
         self.system_prompt = system_prompt
         self.tools: list[Tool] = [get_builtin(t) if isinstance(t, str) else t for t in tools]
@@ -122,11 +142,30 @@ class Agent:
     def auto(self) -> bool:
         return self.model_config.model == AUTO
 
+    def _split_options(self, options: dict[str, Any] | None, provider_name: str | None
+                       ) -> dict[str, dict[str, Any]]:
+        """provider_options as {provider: kwargs}, checked against the providers in play."""
+        in_play = (profile_providers(self.profiles, self.profile) if self.auto
+                   else [self.model_config.provider])
+        if not options:
+            return {}
+        names = set(available_providers())
+        if all(k in names and isinstance(v, dict) for k, v in options.items()):
+            unused = [k for k in options if k not in in_play]
+            if unused:
+                raise ValueError(f"provider_options for {unused}, but this agent only uses "
+                                 f"{in_play} (profile '{self.profile}')")
+            return {k: dict(v) for k, v in options.items()}
+        target = provider_name or (in_play[0] if len(in_play) == 1 else None)
+        if target is None:
+            raise ValueError(f"provider_options are ambiguous: profile '{self.profile}' uses "
+                             f"{in_play}; key them by provider, e.g. {{'{in_play[0]}': {{...}}}}")
+        return {target: dict(options)}
+
     def _check_auto(self, auto_presets: Sequence[str] | None, auto_fallback: str | None) -> None:
         """Fail at construction, not at the first run, on presets that can't be used."""
         router = self.router or get_default_router()
-        provider = self.model_config.provider
-        table = self.presets.get(provider, {})
+        table = self.profiles.get(self.profile, {})
         usable = [p for p in router.tier_order if p in table]
         if auto_presets is None:
             allowed = usable
@@ -135,27 +174,34 @@ class Agent:
             unknown = [p for p in auto_presets if p not in usable]
             if unknown:
                 raise ValueError(f"auto_presets {unknown} unusable: the router picks among "
-                                 f"{router.tier_order}, provider '{provider}' has {list(table)}")
+                                 f"{router.tier_order}, profile '{self.profile}' has "
+                                 f"{list(table)}")
         if not allowed:
             raise ValueError(f"no preset both the router ({router.tier_order}) and "
-                             f"provider '{provider}' ({list(table)}) know")
+                             f"profile '{self.profile}' ({list(table)}) know")
         if auto_fallback is not None and auto_fallback not in allowed:
             raise ValueError(f"auto_fallback '{auto_fallback}' is not in {allowed}")
         self.auto_presets = allowed
+        # Build each allowed preset's provider now: a missing key fails here.
+        for name in allowed:
+            self._provider_for(preset_config(self.profile, name, self.profiles))
 
     def _provider_for(self, config: ModelConfig) -> Provider:
         """The provider for a model config: its preset's endpoint, then explicit options."""
         if self._fixed_provider is not None:
+            if config.provider != self._fixed_provider.name:
+                raise ValueError(f"{config.source} uses provider '{config.provider}': pass "
+                                 "providers by name for profiles that mix them")
             if config.endpoint:
                 raise ValueError(
                     f"{config.source} sets an endpoint ({', '.join(config.endpoint)}): pass "
                     "the provider by name so the harness can configure it")
             return self._fixed_provider
-        key = repr(sorted(config.endpoint.items()))
+        key = repr((config.provider, sorted(config.endpoint.items())))
         if key not in self._providers:
             # Explicit provider_options (e.g. --base-url) win over the preset's.
             kwargs = {**endpoint_kwargs(config.provider, config.endpoint),
-                      **self._provider_options}
+                      **self._provider_options.get(config.provider, {})}
             self._providers[key] = get_provider(config.provider, **kwargs)
         return self._providers[key]
 
@@ -167,7 +213,7 @@ class Agent:
         decision = await router.route(prompt, self.system_prompt,
                                       allowed=self.auto_presets, fallback=self.auto_fallback)
         # The preset directly, not resolve_model(): AGENT_MODEL may be "auto" itself.
-        config = preset_config(self.model_config.provider, decision.preset, self.presets)
+        config = preset_config(self.profile, decision.preset, self.profiles)
         decision.model = config.model
         return (config.model, self._explicit_max_turns or config.max_turns,
                 self._provider_for(config), decision)

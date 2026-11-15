@@ -1,0 +1,27 @@
+# Local models for the cheap tiers, cloud models for the hard ones.
+#
+#   llama-server --jinja -m Qwen3-8B-Q4_K_M.gguf --port 8080 -c 32768
+#   omniharness --profiles examples/profiles/hybrid.toml --profile hybrid --model auto "..."
+#
+# With --model auto, the d1 router picks the tier and the tier picks the
+# provider: lookups and command runs go to the local model, design and subtle
+# reasoning to Claude Opus. Each run's provider and model show in its
+# "Auto model:" line and in the cost table of examples/06_subagents.py.
+
+# Local model for quick, Claude for standard and thorough.
+[profiles.hybrid]
+quick = { provider = "openai", model = "qwen3-8b", base_url = "http://localhost:8080/v1", price_input = 0, price_output = 0, description = "Qwen3 8B, local" }
+standard = { provider = "claude", model = "claude-sonnet-5-5", description = "Claude Sonnet 5.5" }
+thorough = { provider = "claude", model = "claude-opus-5-5", max_turns = 75, description = "Claude Opus 5.5" }
+
+# Local model for quick, OpenAI for standard and thorough.
+[profiles.hybrid-openai]
+quick = { provider = "openai", model = "qwen3-8b", base_url = "http://localhost:8080/v1", price_input = 0, price_output = 0, description = "Qwen3 8B, local" }
+standard = { provider = "openai", model = "gpt-6.1-sol", description = "GPT-6.1 Sol" }
+thorough = { provider = "openai", model = "gpt-6-astra", max_turns = 75, description = "GPT-6 Astra" }
+
+# Claude for the lead's tiers, OpenAI's cheapest model for quick.
+[profiles.claude-openai]
+quick = { provider = "openai", model = "gpt-6-luna", description = "GPT-6 Luna" }
+standard = { provider = "claude", model = "claude-sonnet-5-5", description = "Claude Sonnet 5.5" }
+thorough = { provider = "claude", model = "claude-opus-5-5", max_turns = 75, description = "Claude Opus 5.5" }

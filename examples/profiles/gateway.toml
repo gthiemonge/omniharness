@@ -1,0 +1,33 @@
+# Both providers through a company LLM gateway (litellm, a proxy, ...).
+#
+#   export GATEWAY_KEY=...
+#   omniharness --profiles examples/profiles/gateway.toml --provider openai "..."
+#   omniharness --profiles examples/profiles/gateway.toml --provider claude "..."
+#
+# These override the built-in "openai" and "claude" profiles, so --provider
+# keeps working. The gateway's key never mixes with OPENAI_API_KEY.
+# litellm reports each request's cost in a header, which the harness uses
+# before the price table.
+# The claude provider only takes base_url: the Claude Code CLI reads its key
+# from ANTHROPIC_API_KEY / your login, so set the gateway's key there.
+
+[openai.quick]
+base_url = "https://llm-gateway.example.com/v1"
+api_key_env = "GATEWAY_KEY"
+
+[openai.standard]
+base_url = "https://llm-gateway.example.com/v1"
+api_key_env = "GATEWAY_KEY"
+
+[openai.thorough]
+base_url = "https://llm-gateway.example.com/v1"
+api_key_env = "GATEWAY_KEY"
+
+[claude.quick]
+base_url = "https://llm-gateway.example.com/anthropic"
+
+[claude.standard]
+base_url = "https://llm-gateway.example.com/anthropic"
+
+[claude.thorough]
+base_url = "https://llm-gateway.example.com/anthropic"

@@ -66,7 +66,7 @@ omniharness "What does this project do?" --tools Read,Grep,Glob
 omniharness --provider openai --model gpt-6-luna -q "Name 3 prime numbers"
 omniharness --skill examples/skills/changelog --work-dir ~/src/octavia --output-dir out "since 14.0.0"
 git diff | omniharness - --system "Review this diff for bugs." --json
-omniharness --list-presets
+omniharness --list-profiles
 ```
 
 ## Examples
@@ -100,6 +100,7 @@ and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
 
 | Setting | Argument | CLI | Environment | Default |
 |---------|----------|-----|-------------|---------|
+| profile | `Agent(profile=)` | `--profile` | `AGENT_PROFILE` | the provider's profile |
 | provider | `Agent(provider=)` | `--provider` | `AGENT_PROVIDER` | `claude` |
 | model | `Agent(model=)` | `--model` | `AGENT_MODEL` | preset's model |
 | preset | `Agent(preset=)` | `--preset` | `AGENT_PRESET` | `standard` |
@@ -109,7 +110,7 @@ and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
 | OpenAI organization | `provider_options={"organization": ...}` | `--openai-org` | `OPENAI_ORG` | none |
 | OpenAI prices (USD / 1M tokens) | `provider_options={"price_input": ..., "price_output": ...}` | `--openai-price-input/-output` | `OPENAI_PRICE_INPUT/OUTPUT` | `pricing.PRICING` table |
 | OpenAI API key | `provider_options={"api_key": ...}` | none | `OPENAI_API_KEY` | required |
-| presets file | `presets=load_presets(path)` | `--presets` | `AGENT_PRESETS` | built-in presets |
+| profiles file | `profiles=load_profiles(path)` | `--profiles` | `AGENT_PROFILES` | built-in profiles |
 | d1 server (`auto`) | `D1Router(url=)` | `--d1-url` | `D1_URL` | start one |
 | llama-server binary (`auto`) | `D1Router(llama_server=)` | `--llama-server` | `LLAMA_SERVER` | `PATH` |
 | d1 model file (`auto`) | `D1Router(model_path=)` | `--d1-model` | `D1_MODEL` | Hugging Face cache (`HF_HUB_CACHE` / `HF_HOME`) |
@@ -118,13 +119,18 @@ The Claude SDK reads its own variables (`ANTHROPIC_API_KEY`,
 `CLAUDE_CODE_USE_VERTEX`, ...) directly. To set them for one agent, use
 `provider_options={"options": {"env": {...}}}`.
 
-### Your own presets and hosted models
+### Profiles, presets and hosted models
 
-The built-in presets (`quick` / `standard` / `thorough`) live in
-`config.DEFAULT_PRESETS`. To change them, or to add models hosted behind an
+A **preset** is one tier (`quick`, `standard`, `thorough`): a provider, a
+model and optionally an endpoint. A **profile** is a named set of presets. You
+pick a profile once (`--profile`, or `--provider` for the built-in ones), and
+`--preset` or `--model auto` picks a preset inside it for each run.
+
+The built-in profiles, `claude` and `openai`, live in
+`config.DEFAULT_PROFILES`. To change them, or to add models hosted behind an
 OpenAI-compatible endpoint (vLLM, llama.cpp, TGI, a gateway, ...), write a
-TOML or JSON file. It is merged over the built-in presets field by field. Each
-preset can bring its own endpoint:
+profiles file in TOML or JSON. It is merged over the built-in profiles field
+by field. Each preset can bring its own endpoint:
 
 ```toml
 [openai.quick]                       # the cheap tier, on a self-hosted model
@@ -140,14 +146,14 @@ base_url = "http://vllm.internal:8001/v1"
 ```
 
 ```bash
-omniharness --presets my-presets.toml --list-presets
-omniharness --presets my-presets.toml --provider openai --preset quick "..."
-export AGENT_PRESETS=my-presets.toml        # for every agent in the process
+omniharness --profiles my-profiles.toml --list-profiles
+omniharness --profiles my-profiles.toml --provider openai --preset quick "..."
+export AGENT_PROFILES=my-profiles.toml        # for every agent in the process
 ```
 
 ```python
-from omniharness import Agent, load_presets
-agent = Agent(provider="openai", preset="quick", presets=load_presets("my-presets.toml"))
+from omniharness import Agent, load_profiles
+agent = Agent(provider="openai", preset="quick", profiles=load_profiles("my-profiles.toml"))
 ```
 
 - **Fields:** `model`, `max_turns` and `description`, plus the preset's
@@ -163,14 +169,58 @@ agent = Agent(provider="openai", preset="quick", presets=load_presets("my-preset
 - **With `model="auto"`,** the endpoint follows the routed preset: a task
   routed to `quick` goes to the hosted model, one routed to `standard` goes to
   OpenAI.
-- **Python:** `load_presets(path)` returns the merged table;
-  `load_presets(path, base={})` uses the file alone. `Agent(presets=...)` takes
-  a whole table, as before.
+- **Python:** `load_profiles(path)` returns the merged table;
+  `load_profiles(path, base={})` uses the file alone. `Agent(profiles=...)` takes
+  a whole table.
 - **The server must implement `/v1/responses`.** Tested with llama.cpp
   v0.8.0's `llama-server --jinja` serving Qwen2.5-1.5B-Instruct: plain answers,
   tool calls, key checking (a wrong key gets a 401) and cost reporting.
 
-See [`examples/presets.example.toml`](examples/presets.example.toml).
+### Profiles: mixing providers and local models
+
+In a profile, each preset names its own provider. The built-in profiles use
+one provider each; `--provider openai` selects the `openai` profile. Your own
+profiles can mix providers, so any tier can be a local model, Claude or
+OpenAI:
+
+```toml
+[profiles.hybrid]                    # a local model for quick, Claude for the rest
+quick    = { provider = "openai", model = "qwen3-8b", base_url = "http://localhost:8080/v1" }
+standard = { provider = "claude", model = "claude-sonnet-5-5" }
+thorough = { provider = "claude", model = "claude-opus-5-5" }
+
+[profiles.offline]                   # local models only: nothing leaves your network
+quick    = { provider = "openai", model = "qwen3-8b",  base_url = "http://localhost:8080/v1" }
+standard = { provider = "openai", model = "qwen3-32b", base_url = "http://gpu-box:8000/v1" }
+thorough = { provider = "openai", model = "qwen3-32b", base_url = "http://gpu-box:8000/v1" }
+```
+
+```bash
+omniharness --profiles my-profiles.toml --profile hybrid --preset quick "..."
+omniharness --profiles my-profiles.toml --profile hybrid --model auto "..."
+AGENT_PROFILES=my-profiles.toml AGENT_PROFILE=offline python examples/06_subagents.py . --worker-model auto
+```
+
+- **Selection:** `--profile` / `AGENT_PROFILE`, else the profile named by
+  `--provider` / `AGENT_PROVIDER`, else `claude`. A preset brings its
+  provider, model and endpoint. An explicit `--model` runs on the profile's
+  `standard` preset's provider, unless `--provider` says otherwise.
+- **With `model="auto"`,** d1 picks the tier and the tier picks the provider.
+  With `hybrid`, a lookup goes to the local model and a design question to
+  Claude Opus. `auto_presets` limits the tiers as usual.
+- **Offline by design:** if every preset of the profile is local, an agent
+  using it never creates a cloud client, not even before its first run.
+- **Provider options on a mixed profile** are keyed by provider:
+  `provider_options={"openai": {...}, "claude": {...}}`. The flat form is an
+  error when it would be ambiguous, and options for a provider the profile
+  doesn't use are rejected. On the CLI, `--base-url` needs `--provider` then.
+- **File syntax:** `[profiles.<name>.<preset>]` or inline tables, as above;
+  each new preset must set `provider`. `[openai.<preset>]` is shorthand for a
+  preset of the `openai` profile on the `openai` provider.
+
+See [`examples/profiles/`](examples/profiles/) for sample files: offline with
+llama-server or Ollama, a vLLM cluster, hybrid local and cloud, a company
+gateway, and an annotated reference.
 
 For OpenAI, cost comes from a gateway's `x-litellm-response-cost` header when
 present. Otherwise it is computed from the pricing table; add models with
@@ -365,8 +415,8 @@ podman run --rm -it --userns=keep-id -e ANTHROPIC_API_KEY \
   `-e OPENAI_BASE_URL`, and so on. The image doesn't contain your Claude Code
   login. Mounting `~/.claude` would provide it, but it would also bring your
   Claude Code settings and hooks into every agent.
-- **Hosted models:** mount a presets file and point to it, e.g.
-  `-v ./presets.toml:/presets.toml:Z,ro -e AGENT_PRESETS=/presets.toml -e VLLM_API_KEY`.
+- **Hosted models:** mount a profiles file and point to it, e.g.
+  `-v ./profiles.toml:/profiles.toml:Z,ro -e AGENT_PROFILES=/profiles.toml -e VLLM_API_KEY`.
   To reach a server on the host itself, use `http://host.containers.internal:PORT/v1`
   as its `base_url`.
 - **The examples and the routing eval** are in `/opt/omniharness`:
@@ -419,7 +469,7 @@ from .review_config import OPENAI_PRICING, PRESETS
 for name, rates in OPENAI_PRICING.items():
     register_pricing(name, **rates)
 
-cfg = resolve_model(provider, preset, model_override, presets=PRESETS)
+cfg = resolve_model(provider, preset, model_override, profiles=PRESETS)
 print(f"Using {cfg.provider} / {cfg.model} (from {cfg.source})")
 provider_options = {}
 if cfg.provider == "openai":

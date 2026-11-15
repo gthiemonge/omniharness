@@ -247,7 +247,7 @@ def test_agent_auto_settings_are_checked():
     with pytest.raises(ValueError, match="need model='auto'"):
         Agent(provider=OpenAIProvider(client=object()), model="gpt-6.1-sol", auto_presets=["quick"])
     # Presets the provider lacks are left out.
-    agent, _ = _auto_agent(router, presets={"openai": {"quick": {"model": "m"}}})
+    agent, _ = _auto_agent(router, profiles={"openai": {"quick": {"model": "m"}}})
     assert agent.auto_presets == ["quick"]
 
 

@@ -26,12 +26,12 @@ def test_resolve_precedence(monkeypatch):
 
 def test_resolve_custom_presets_and_errors():
     presets = {"claude": {"fast": {"model": "m", "max_turns": 5}}}
-    cfg = resolve_model(preset="fast", presets=presets)
+    cfg = resolve_model(preset="fast", profiles=presets)
     assert (cfg.model, cfg.max_turns) == ("m", 5)
     with pytest.raises(ValueError, match="Unknown preset"):
-        resolve_model(preset="nope", presets=presets)
-    with pytest.raises(ValueError, match="No presets"):
-        resolve_model(provider="other", presets=presets)
+        resolve_model(preset="nope", profiles=presets)
+    with pytest.raises(ValueError, match="No profile"):
+        resolve_model(provider="other", profiles=presets)
 
 
 def test_load_skill(tmp_path):

@@ -1,0 +1,36 @@
+# Models served by a vLLM cluster on your network, with an API key.
+#
+#   export VLLM_API_KEY=...
+#   omniharness --profiles examples/profiles/vllm.toml --profile vllm --model auto "..."
+#
+# Start vLLM with tool calling on, e.g.
+#   vllm serve Qwen/Qwen3-32B --enable-auto-tool-choice --tool-call-parser hermes --api-key ...
+# Set the prices to what the GPUs cost you, or 0.
+
+[profiles.vllm.quick]
+provider = "openai"
+model = "Qwen/Qwen3-8B"
+base_url = "http://vllm.internal:8000/v1"
+api_key_env = "VLLM_API_KEY"
+price_input = 0.05
+price_output = 0.10
+description = "Qwen3 8B on vLLM"
+
+[profiles.vllm.standard]
+provider = "openai"
+model = "Qwen/Qwen3-32B"
+base_url = "http://vllm.internal:8001/v1"
+api_key_env = "VLLM_API_KEY"
+price_input = 0.20
+price_output = 0.60
+description = "Qwen3 32B on vLLM"
+
+[profiles.vllm.thorough]
+provider = "openai"
+model = "Qwen/Qwen3-235B-A22B"
+base_url = "http://vllm.internal:8002/v1"
+api_key_env = "VLLM_API_KEY"
+price_input = 0.60
+price_output = 1.80
+max_turns = 75
+description = "Qwen3 235B on vLLM"

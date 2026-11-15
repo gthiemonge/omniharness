@@ -17,7 +17,7 @@ import sys
 from dataclasses import asdict
 
 from .agent import Agent
-from .config import DEFAULT_PROVIDER, format_presets, get_presets, load_presets
+from .config import format_profiles, get_profiles, load_profiles
 from .providers import available_providers
 from .reporting import Reporter
 from .routing import D1Router
@@ -29,7 +29,7 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="omniharness",
         description="Run a tool-using AI agent with Claude or OpenAI.",
-        epilog=format_presets(),
+        epilog=format_profiles(),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     p.add_argument("prompt", nargs="?", help="Task for the agent ('-' reads stdin).")
@@ -38,9 +38,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--model", help="Model id, or 'auto' to let the local d1 decision model "
                    "pick a preset from the prompt (env AGENT_MODEL; overrides --preset).")
     p.add_argument("--preset", help="Model preset: quick, standard, thorough (env AGENT_PRESET).")
-    p.add_argument("--presets", metavar="FILE", help="TOML or JSON file of presets, merged "
+    p.add_argument("--profile", help="Profile: a set of presets, each with its provider, "
+                   "e.g. 'hybrid' from a profiles file (env AGENT_PROFILE; default: the "
+                   "provider's own profile).")
+    p.add_argument("--profiles", metavar="FILE", help="TOML or JSON file of profiles, merged "
                    "over the built-in ones; a preset can set its own base_url, "
-                   "api_key_env, ... (env AGENT_PRESETS).")
+                   "api_key_env, ... (env AGENT_PROFILES).")
     p.add_argument("--effort", help="Reasoning effort: low, medium, high (env AGENT_EFFORT).")
     p.add_argument("--max-turns", type=int, help="Maximum agent turns.")
     p.add_argument("--tools", default="",
@@ -74,21 +77,21 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--quiet", "-q", action="store_true",
                    help="Only print the final answer.")
     p.add_argument("--json", action="store_true", help="Print the result as JSON.")
-    p.add_argument("--list-presets", action="store_true",
-                   help="List the presets in effect (with --presets / AGENT_PRESETS) and exit.")
+    p.add_argument("--list-profiles", action="store_true",
+                   help="List the profiles in effect (with --profiles / AGENT_PROFILES) and exit.")
     return p
 
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        presets = load_presets(args.presets) if args.presets else get_presets()
+        profiles = load_profiles(args.profiles) if args.profiles else get_profiles()
     except (OSError, ValueError) as exc:
-        print(f"Error: presets: {exc}", file=sys.stderr)
+        print(f"Error: profiles: {exc}", file=sys.stderr)
         return 1
 
-    if args.list_presets:
-        print(format_presets(presets))
+    if args.list_profiles:
+        print(format_profiles(profiles))
         return 0
 
     prompt = args.prompt
@@ -119,17 +122,22 @@ def main(argv=None) -> int:
     else:
         tools = [t.strip() for t in tools_arg.split(",") if t.strip()]
 
-    provider = (args.provider or os.getenv("AGENT_PROVIDER") or DEFAULT_PROVIDER).lower()
-    provider_options = {}
-    if args.base_url:
-        provider_options["base_url"] = args.base_url
+    # OpenAI-only flags are keyed to "openai"; the Agent rejects them when no
+    # preset in play uses OpenAI. --base-url goes to --provider when given,
+    # else to the only provider in play (the Agent rejects it if ambiguous).
+    provider_options: dict = {}
     openai_only = {"organization": args.openai_org, "price_input": args.openai_price_input,
                    "price_output": args.openai_price_output}
     openai_only = {k: v for k, v in openai_only.items() if v is not None}
     if openai_only:
-        if provider != "openai":
-            build_parser().error("--openai-org / --openai-price-* need --provider openai")
-        provider_options.update(openai_only)
+        provider_options["openai"] = openai_only
+    if args.base_url:
+        if args.provider:
+            provider_options.setdefault(args.provider, {})["base_url"] = args.base_url
+        elif provider_options:
+            build_parser().error("--base-url with --openai-* flags needs --provider")
+        else:
+            provider_options["base_url"] = args.base_url
 
     router = None
     if args.d1_url or args.llama_server or args.d1_model:
@@ -142,7 +150,8 @@ def main(argv=None) -> int:
             provider=args.provider,
             model=args.model,
             preset=args.preset,
-            presets=presets,
+            profile=args.profile,
+            profiles=profiles,
             system_prompt=system_prompt,
             tools=tools,
             work_dir=args.work_dir,
