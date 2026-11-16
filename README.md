@@ -116,6 +116,39 @@ and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
 | llama-server binary (`auto`) | `D1Router(llama_server=)` | `--llama-server` | `LLAMA_SERVER` | `PATH` |
 | d1 model file (`auto`) | `D1Router(model_path=)` | `--d1-model` | `D1_MODEL` | Hugging Face cache (`HF_HUB_CACHE` / `HF_HOME`) |
 
+### The same options in your scripts
+
+`AgentOptions` adds these options to your own `argparse` parser, and turns the
+parsed arguments into `Agent(...)` keyword arguments:
+
+```python
+import argparse
+from omniharness import Agent, AgentOptions
+
+parser = argparse.ArgumentParser()
+parser.add_argument("repo")
+options = AgentOptions(parser)              # --profiles, --base-url, --d1-url, ...
+options.add_agent()                         # --provider, --profile, --model, --preset, ...
+args = parser.parse_args()
+agent = Agent(**options.agent_kwargs(args), work_dir=args.repo, tools=[...])
+```
+
+With several agents, give each a name: its options get that prefix, and the
+shared ones (profiles file, endpoints, context window, d1 server) apply to all
+of them, with one d1 server for the whole process:
+
+```python
+options.add_agent("orchestrator", preset="standard")   # --orchestrator-model, ...
+options.add_agent("worker", preset="quick")            # --worker-model, --worker-profile, ...
+lead = Agent(**options.agent_kwargs(args, "orchestrator"), ...)
+worker = Agent(**options.agent_kwargs(args, "worker"), ...)
+```
+
+A shared option that only some agents can use, such as `--openai-org` with a
+Claude orchestrator and OpenAI workers, is ignored by the others. With a single
+agent, it's an error. `omniharness` itself and `examples/06_subagents.py` are
+built this way.
+
 The Claude SDK reads its own variables (`ANTHROPIC_API_KEY`,
 `CLAUDE_CODE_USE_VERTEX`, ...) directly. To set them for one agent, use
 `provider_options={"options": {"env": {...}}}`.

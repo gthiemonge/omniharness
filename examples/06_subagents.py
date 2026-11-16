@@ -24,9 +24,16 @@ calls at once.
     # Let the local d1 decision model pick each worker task's model, between
     # quick and standard (see 07_auto_model.py)
     python examples/06_subagents.py . --worker-model auto
+    # Workers on a local profile, the orchestrator on Claude
+    python examples/06_subagents.py . --profiles examples/profiles/hybrid.toml \
+        --worker-profile hybrid --worker-model auto
+
+The options come from omniharness.AgentOptions: every omniharness model
+option, once per agent (--orchestrator-*, --worker-*), plus the shared ones
+(--profiles, --base-url, --d1-url, ...). See --help.
 
 Model selection, per tier: --*-model if given, else the --*-preset's model for
-the tier's provider. AGENT_MODEL is ignored here, since it would put both tiers
+the tier's profile. AGENT_MODEL is ignored here, since it would put both tiers
 on the same model.
 """
 
@@ -34,7 +41,7 @@ import argparse
 import os
 import sys
 
-from omniharness import READ_ONLY_TOOLS, Agent, ConsoleReporter, RunResult
+from omniharness import READ_ONLY_TOOLS, Agent, AgentOptions, ConsoleReporter, RunResult
 
 DEFAULT_TASK = (
     "Write a one-page onboarding guide for this repository: what it does, how "
@@ -122,13 +129,9 @@ def main() -> int:
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("repo", help="Repository to work on")
     parser.add_argument("task", nargs="?", default=DEFAULT_TASK)
-    parser.add_argument("--orchestrator-preset", default="standard")
-    parser.add_argument("--worker-preset", default="quick")
-    parser.add_argument("--orchestrator-model", help="Exact orchestrator model "
-                        "(overrides --orchestrator-preset)")
-    parser.add_argument("--worker-model", help="Exact worker model (overrides --worker-preset)")
-    parser.add_argument("--worker-provider", help="Provider for the workers "
-                        "(default: same as the orchestrator, $AGENT_PROVIDER or claude)")
+    options = AgentOptions(parser)
+    options.add_agent("orchestrator", preset="standard")
+    options.add_agent("worker", preset="quick")
     args = parser.parse_args()
 
     # AGENT_MODEL outranks presets in the harness, so it would collapse both
@@ -139,25 +142,32 @@ def main() -> int:
               "per tier. Use --orchestrator-model / --worker-model instead.",
               file=sys.stderr)
 
-    # With --worker-model auto, d1 picks each task's model, but a worker never
-    # goes above "standard" and falls back to "quick" if d1 is unavailable.
-    worker_auto = {}
-    if args.worker_model == "auto":
-        worker_auto = {"auto_presets": ["quick", "standard"], "auto_fallback": "quick"}
+    try:
+        lead_options = options.agent_kwargs(args, "orchestrator")
+        worker_options = options.agent_kwargs(args, "worker")
+    except ValueError as e:
+        parser.error(str(e))
+    # Turn caps: the --*-max-turns options, else these.
+    lead_turns = lead_options.pop("max_turns") or 20
+    worker_turns = worker_options.pop("max_turns")
+
+    # With --worker-model auto, d1 picks each task's model, but by default a
+    # worker never goes above "standard" and falls back to "quick" if d1 is
+    # unavailable (--worker-auto-presets / --worker-auto-fallback change that).
+    if worker_options["model"] == "auto":
+        worker_options["auto_presets"] = worker_options["auto_presets"] or ["quick", "standard"]
+        worker_options["auto_fallback"] = worker_options["auto_fallback"] or "quick"
 
     # Each worker's runs, recorded by its reporter, for the cost breakdown.
     worker_runs: dict[str, list[RunResult]] = {"explorer": [], "runner": []}
 
     def worker(name: str, system_prompt: str, tools: list, max_turns: int) -> Agent:
         return Agent(
-            provider=args.worker_provider,
-            model=args.worker_model,
-            preset=args.worker_preset,
-            **worker_auto,
+            **worker_options,
             system_prompt=system_prompt,
             tools=tools,
             work_dir=args.repo,
-            max_turns=max_turns,
+            max_turns=worker_turns or max_turns,
             # Workers may run concurrently: prefix their lines and keep them short.
             reporter=WorkerReporter(name, worker_runs[name]),
         )
@@ -166,8 +176,7 @@ def main() -> int:
     runner = worker("runner", RUNNER_PROMPT, ["Bash"], max_turns=15)
 
     orchestrator = Agent(
-        model=args.orchestrator_model,
-        preset=args.orchestrator_preset,
+        **lead_options,
         system_prompt=ORCHESTRATOR_PROMPT,
         tools=[
             "Glob",
@@ -185,7 +194,7 @@ def main() -> int:
             ),
         ],
         work_dir=args.repo,
-        max_turns=20,
+        max_turns=lead_turns,
         # The cost table below replaces the generic summary.
         reporter=ConsoleReporter(max_result_lines=6, show_summary=False),
     )
@@ -194,7 +203,8 @@ def main() -> int:
           f"({orchestrator.model_config.source})")
     workers = f"{explorer.model_config.provider}/{explorer.model}"
     if explorer.auto:
-        workers += f" among {explorer.auto_presets}, fallback {explorer.auto_fallback}"
+        workers = (f"auto in profile '{explorer.profile}', among {explorer.auto_presets}, "
+                   f"fallback {explorer.auto_fallback}")
     print(f"Workers:      {workers} ({explorer.model_config.source})\n")
     result = orchestrator.run_sync(args.task)
     if not result.success:

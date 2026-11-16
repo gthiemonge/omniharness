@@ -61,6 +61,7 @@ class Agent:
         reporter: Reporter | None = None,
         profiles: dict[str, dict[str, dict]] | None = None,
         provider_options: dict[str, Any] | None = None,
+        strict_options: bool = True,
         router: Router | None = None,
         auto_presets: Sequence[str] | None = None,
         auto_fallback: str | None = None,
@@ -93,6 +94,9 @@ class Agent:
                 {"base_url": ...}, or keyed by provider when the profile mixes
                 them: {"openai": {...}, "claude": {...}}. They win over the
                 presets' endpoints.
+            strict_options: Reject provider_options for a provider this agent
+                doesn't use. False when one set of options serves several
+                agents (see AgentOptions): such options are then ignored.
             router: Picks a preset per run when the model or preset is "auto".
                 Defaults to the process-wide D1Router (routing.py).
             auto_presets: With "auto", the presets this agent may get, e.g.
@@ -110,7 +114,8 @@ class Agent:
         # A Provider instance is used as is; names are built per provider and
         # endpoint, since presets can differ in both (see _provider_for).
         self._fixed_provider = provider if isinstance(provider, Provider) else None
-        self._provider_options = self._split_options(provider_options, provider_name)
+        self._provider_options = self._split_options(provider_options, provider_name,
+                                                     strict_options)
         self._providers: dict[str, Provider] = {}
         # With "auto" each run picks its preset, and so its provider: none is
         # built up front (an offline profile must not create a cloud client).
@@ -146,8 +151,8 @@ class Agent:
     def auto(self) -> bool:
         return self.model_config.model == AUTO
 
-    def _split_options(self, options: dict[str, Any] | None, provider_name: str | None
-                       ) -> dict[str, dict[str, Any]]:
+    def _split_options(self, options: dict[str, Any] | None, provider_name: str | None,
+                       strict: bool = True) -> dict[str, dict[str, Any]]:
         """provider_options as {provider: kwargs}, checked against the providers in play."""
         in_play = (profile_providers(self.profiles, self.profile) if self.auto
                    else [self.model_config.provider])
@@ -156,10 +161,10 @@ class Agent:
         names = set(available_providers())
         if all(k in names and isinstance(v, dict) for k, v in options.items()):
             unused = [k for k in options if k not in in_play]
-            if unused:
+            if unused and strict:
                 raise ValueError(f"provider_options for {unused}, but this agent only uses "
                                  f"{in_play} (profile '{self.profile}')")
-            return {k: dict(v) for k, v in options.items()}
+            return {k: dict(v) for k, v in options.items() if k in in_play}
         target = provider_name or (in_play[0] if len(in_play) == 1 else None)
         if target is None:
             raise ValueError(f"provider_options are ambiguous: profile '{self.profile}' uses "

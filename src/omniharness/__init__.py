@@ -15,6 +15,7 @@ from .config import (
     merge_profiles,
     resolve_model,
 )
+from .options import AgentOptions
 from .pricing import register_pricing
 from .providers import Provider, get_provider, register_provider
 from .reporting import ConsoleReporter, Reporter, format_summary, print_usage_summary
@@ -42,6 +43,7 @@ __all__ = [
     "DEFAULT_PROFILES",
     "READ_ONLY_TOOLS",
     "Agent",
+    "AgentOptions",
     "ConsoleReporter",
     "D1Router",
     "FixedRouter",
