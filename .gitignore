@@ -8,3 +8,10 @@ venv/
 .pytest_cache/
 .ruff_cache/
 out/
+# llama.cpp source and builds (see README: Container / auto-classifier)
+third_party/
+# Files the examples write into the current directory
+notes.md
+events.jsonl
+# llama-server logs copied around for debugging
+*.log
