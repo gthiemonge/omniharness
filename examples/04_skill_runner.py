@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """
-Run a Claude-style skill (SKILL.md) on either provider — the pattern used by
-openstack-review. The skill's directory is exposed to the agent as $SKILL_DIR
-so it can call its helper scripts.
+Run a Claude-style skill (SKILL.md) on either provider. The skill's directory
+is exposed to the agent as $SKILL_DIR so it can call its helper scripts.
 
     python examples/04_skill_runner.py examples/skills/changelog ~/src/myrepo "since v1.2.0"
     AGENT_PROVIDER=openai python examples/04_skill_runner.py examples/skills/changelog .
