@@ -4,30 +4,40 @@
 #   omniharness --profiles examples/profiles/gateway.toml --provider openai "..."
 #   omniharness --profiles examples/profiles/gateway.toml --provider claude "..."
 #
-# These override the built-in "openai" and "claude" profiles, so --provider
-# keeps working. The gateway's key never mixes with OPENAI_API_KEY.
+# The profiles are named like the built-in ones, so --provider keeps working.
+# The gateway's key never mixes with OPENAI_API_KEY.
 # litellm reports each request's cost in a header, which the harness uses
 # before the price table.
 # The claude provider only takes base_url: the Claude Code CLI reads its key
 # from ANTHROPIC_API_KEY / your login, so set the gateway's key there.
 
 [openai.quick]
+model = "gpt-6-luna"
 base_url = "https://llm-gateway.example.com/v1"
 api_key_env = "GATEWAY_KEY"
+max_turns = 30
 
 [openai.standard]
+model = "gpt-6.1-sol"
 base_url = "https://llm-gateway.example.com/v1"
 api_key_env = "GATEWAY_KEY"
 
 [openai.thorough]
+model = "gpt-6-astra"
 base_url = "https://llm-gateway.example.com/v1"
 api_key_env = "GATEWAY_KEY"
+max_turns = 75
 
 [claude.quick]
+model = "claude-haiku-5-5"
 base_url = "https://llm-gateway.example.com/anthropic"
+max_turns = 30
 
 [claude.standard]
+model = "claude-sonnet-5-5"
 base_url = "https://llm-gateway.example.com/anthropic"
 
 [claude.thorough]
+model = "claude-opus-5-5"
 base_url = "https://llm-gateway.example.com/anthropic"
+max_turns = 75

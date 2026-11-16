@@ -21,8 +21,8 @@ router to pick a preset of the profile for each run (see routing.py).
     AGENT_PROFILE=hybrid AGENT_MODEL=auto python my_agent.py
 
 Your own profiles and presets go in a profiles file (TOML or JSON) loaded with
-load_profiles(), --profiles or {PREFIX}PROFILES, merged over DEFAULT_PROFILES field
-by field:
+load_profiles(), --profiles or {PREFIX}PROFILES. Its profiles replace the
+built-in ones: only what the file defines exists, each preset complete:
 
     [openai.quick]                           # a preset of the "openai" profile
     model = "Qwen/Qwen3-32B"
@@ -117,7 +117,12 @@ def resolve_model(
     arg_provider = provider.lower() if provider else None
     env_provider = (os.getenv(f"{env_prefix}PROVIDER") or "").lower() or None
     profile_name = (profile or os.getenv(f"{env_prefix}PROFILE") or arg_provider
-                    or env_provider or default_provider)
+                    or env_provider)
+    if profile_name is None:
+        # Nothing chosen: the default provider's profile, else (profiles from a
+        # file that doesn't define it) the first profile.
+        profile_name = (default_provider if default_provider in profiles or not profiles
+                        else next(iter(profiles)))
     table = profiles.get(profile_name)
 
     def run_provider() -> str:
@@ -204,12 +209,16 @@ def endpoint_kwargs(provider: str, endpoint: dict) -> dict:
 
 def load_profiles(path: str | Path, base: dict[str, dict[str, dict]] | None = None
                  ) -> dict[str, dict[str, dict]]:
-    """Read a TOML or JSON profiles file and merge it over `base` (default: DEFAULT_PROFILES).
+    """Read a TOML or JSON profiles file: its profiles replace the built-in ones.
 
     The file holds provider tables ([openai.quick] ...: presets of the profile
     of that name, on that provider) and/or a profiles table
-    ([profiles.hybrid.quick] ...: each preset names its provider). Pass
-    base={} to use the file alone.
+    ([profiles.hybrid.quick] ...: each preset names its provider). Each preset
+    is complete, with at least a model. A profile the file doesn't define
+    doesn't exist, built-in ones included.
+
+    base: a table to merge the file over, field by field, instead, e.g.
+    base=DEFAULT_PROFILES to keep the built-in profiles and change some of them.
     """
     path = Path(path).expanduser()
     text = path.read_text()
@@ -226,7 +235,9 @@ def load_profiles(path: str | Path, base: dict[str, dict[str, dict]] | None = No
                                  "or use a .json file") from None
         data = tomllib.loads(text)
     overrides = _file_to_profiles(data, str(path))
-    merged = merge_profiles(DEFAULT_PROFILES if base is None else base, overrides)
+    merged = merge_profiles(base or {}, overrides)
+    if not merged:
+        raise ValueError(f"{path}: defines no profile")
     _check_fields(merged, str(path))
     return merged
 
@@ -263,7 +274,7 @@ def normalize_profiles(profiles: dict[str, dict[str, dict]]) -> dict[str, dict[s
 
 
 def get_profiles(env_prefix: str = "AGENT_") -> dict[str, dict[str, dict]]:
-    """DEFAULT_PROFILES, merged with the file named by {env_prefix}PROFILES if set."""
+    """The profiles of the file named by {env_prefix}PROFILES if set, else DEFAULT_PROFILES."""
     path = os.getenv(f"{env_prefix}PROFILES")
     return load_profiles(path) if path else DEFAULT_PROFILES
 

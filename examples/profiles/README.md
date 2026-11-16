@@ -1,7 +1,7 @@
 # Sample profiles files
 
 Each file works as is with `--profiles` (or `AGENT_PROFILES`, or
-`load_profiles()` in Python), merged over the built-in profiles. Copy one and
+`load_profiles()` in Python): its profiles replace the built-in ones. Copy one and
 change the hosts, models and key variables to yours.
 
 | File | Profile(s) | Setup |

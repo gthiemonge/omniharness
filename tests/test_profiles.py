@@ -41,10 +41,9 @@ def _agent(presets, **kwargs):
 # ── loading ────────────────────────────────────────────────────────────────
 
 
-def test_profiles_load_next_to_the_builtin_ones(presets):
-    assert list(presets) == ["claude", "openai", "hybrid", "offline"]
+def test_profiles_replace_the_builtin_ones(presets):
+    assert list(presets) == ["hybrid", "offline"]
     assert presets["hybrid"]["thorough"]["provider"] == "claude"
-    assert presets["openai"]["quick"]["provider"] == "openai"
     listing = format_profiles(presets)
     assert "openai/qwen3-8b" in listing and "@ http://localhost:8080/v1" in listing
     assert "claude/claude-opus-5-5" in listing  # provider shown when it isn't the profile's

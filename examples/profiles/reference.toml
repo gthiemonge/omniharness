@@ -1,10 +1,13 @@
-# Your own profiles and presets, merged over the built-in profiles field by field.
+# Your own profiles and presets. A profiles file replaces the built-in profiles:
+# only the profiles defined here exist, and each preset is complete (at least a
+# model). Merging over the built-ins instead is a Python option:
+# load_profiles(path, base=DEFAULT_PROFILES).
 #
 #   omniharness --profiles examples/profiles/reference.toml --list-profiles
 #   AGENT_PROFILES=my-profiles.toml python examples/06_subagents.py . --worker-model auto
 #   Agent(profiles=load_profiles("my-profiles.toml"), ...)
 #
-# Fields: model, max_turns, description, effort, and the endpoint of that preset:
+# Fields: model (required), max_turns, description, effort, and the endpoint:
 #   openai: base_url, api_key_env, organization, price_input, price_output,
 #           api ("auto" | "responses" | "chat": the wire format, default auto),
 #           context_window (tokens: trim requests to fit; default: no trimming)
@@ -27,11 +30,19 @@ model = "qwen3-coder"
 max_turns = 60
 base_url = "http://vllm.internal:8001/v1"
 
-# standard / thorough keep their defaults (gpt-6.1-sol / gpt-6-astra, on
-# OPENAI_BASE_URL or api.openai.com).
+# Cloud tiers, on OPENAI_BASE_URL or api.openai.com.
+[openai.standard]
+model = "gpt-6.1-sol"
+description = "GPT-6.1 Sol"
+
+[openai.thorough]
+model = "gpt-6-astra"
+max_turns = 75
+description = "GPT-6 Astra"
 
 # Claude models through a gateway:
 # [claude.standard]
+# model = "claude-sonnet-5-5"
 # base_url = "https://llm-gateway.example.com/anthropic"
 
 # ── Profiles: each preset names its provider ──────────────────────────────

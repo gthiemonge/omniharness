@@ -24,6 +24,9 @@ api_key_env = "VLLM_KEY"
 price_input = 0.1
 price_output = 0.3
 
+[openai.standard]
+model = "gpt-6.1-sol"
+
 [openai.coder]
 model = "qwen3-coder"
 max_turns = 60
@@ -53,16 +56,33 @@ def _agent(**kwargs):
 # ── loading ────────────────────────────────────────────────────────────────
 
 
-def test_file_merges_over_defaults(hosted):
-    presets = load_profiles(hosted)
-    quick = presets["openai"]["quick"]
-    assert quick["model"] == "Qwen/Qwen3-32B"
-    assert quick["max_turns"] == 30  # kept from the default preset
-    assert presets["openai"]["coder"]["max_turns"] == 60
-    assert presets["openai"]["standard"] == DEFAULT_PROFILES["openai"]["standard"]
-    assert presets["claude"] == DEFAULT_PROFILES["claude"]
+def test_file_replaces_the_builtin_profiles(hosted):
+    profiles = load_profiles(hosted)
+    assert list(profiles) == ["openai"]  # no "claude" profile: the file doesn't define one
+    assert list(profiles["openai"]) == ["quick", "standard", "coder"]  # no built-in "thorough"
+    quick = profiles["openai"]["quick"]
+    assert quick["model"] == "Qwen/Qwen3-32B" and "max_turns" not in quick  # nothing merged
     assert DEFAULT_PROFILES["openai"]["quick"]["model"] == "gpt-6-luna"  # not mutated
-    assert load_profiles(hosted, base={})["openai"].keys() == {"quick", "coder"}
+
+
+def test_merging_over_the_builtin_profiles_on_request(hosted):
+    profiles = load_profiles(hosted, base=DEFAULT_PROFILES)
+    assert list(profiles) == ["claude", "openai"]
+    assert profiles["openai"]["quick"]["max_turns"] == 30  # kept from the built-in preset
+    assert profiles["openai"]["thorough"] == DEFAULT_PROFILES["openai"]["thorough"]
+
+
+def test_default_profile_is_the_files_first_when_claude_is_missing(hosted):
+    # No --profile / --provider, and the file has no "claude" profile.
+    agent = Agent(profiles=load_profiles(hosted), preset="coder", reporter=Reporter())
+    assert (agent.profile, agent.model) == ("openai", "qwen3-coder")
+
+
+def test_empty_file(tmp_path):
+    path = tmp_path / "p.toml"
+    path.write_text("# nothing\n")
+    with pytest.raises(ValueError, match="defines no profile"):
+        load_profiles(path)
 
 
 def test_json_file(tmp_path):
@@ -72,10 +92,10 @@ def test_json_file(tmp_path):
 
 
 @pytest.mark.parametrize(("text", "error"), [
-    ('[openai.quick]\nmodle = "x"\n', "unknown field"),
+    ('[openai.quick]\nmodel = "m"\nmodle = "x"\n', "unknown field"),
     ('[openai.new]\nmax_turns = 3\n', "has no model"),
     ('[openai.quick]\napi_key = "sk-..."\n', "api_key_env"),
-    ('[claude.quick]\napi_key_env = "K"\n', "unknown field"),  # claude: base_url only
+    ('[claude.quick]\nmodel = "m"\napi_key_env = "K"\n', "unknown field"),  # claude: base_url
 ])
 def test_invalid_files(tmp_path, text, error):
     path = tmp_path / "p.toml"
@@ -168,7 +188,7 @@ def test_cli_list_profiles_shows_the_file(hosted, capsys):
 
 def test_cli_bad_presets_file(tmp_path, capsys):
     path = tmp_path / "p.toml"
-    path.write_text('[openai.quick]\nmodle = "x"\n')
+    path.write_text('[openai.quick]\nmodel = "m"\nmodle = "x"\n')
     assert cli.main(["--profiles", str(path), "hi"]) == 1
     assert "unknown field" in capsys.readouterr().err
 
@@ -182,10 +202,7 @@ def test_sample_presets_files(path, monkeypatch):
     for var in ("VLLM_API_KEY", "VLLM_KEY", "GATEWAY_KEY"):
         monkeypatch.setenv(var, "test-key")
     presets = load_profiles(path)
-    defined = {name for name in presets
-               if name not in DEFAULT_PROFILES or presets[name] != DEFAULT_PROFILES[name]}
-    assert defined, f"{path.name} changes nothing"
-    for profile in defined:
+    for profile in presets:
         agent = Agent(profiles=presets, profile=profile, model="auto",
                       router=FixedRouter("quick"), reporter=Reporter())
         assert agent.auto_presets

@@ -163,8 +163,10 @@ pick a profile once (`--profile`, or `--provider` for the built-in ones), and
 The built-in profiles, `claude` and `openai`, live in
 `config.DEFAULT_PROFILES`. To change them, or to add models hosted behind an
 OpenAI-compatible endpoint (vLLM, llama.cpp, TGI, a gateway, ...), write a
-profiles file in TOML or JSON. It is merged over the built-in profiles field
-by field. Each preset can bring its own endpoint:
+profiles file in TOML or JSON. **The file replaces the built-in profiles:**
+only the profiles it defines exist (a file with only `openai` presets has no
+`claude` profile), and each preset is complete, with at least a `model`. Each
+preset can bring its own endpoint:
 
 ```toml
 [openai.quick]                       # the cheap tier, on a self-hosted model
@@ -174,7 +176,13 @@ api_key_env = "VLLM_API_KEY"         # the variable that holds the key
 price_input = 0.10                   # USD per 1M tokens, for cost reports
 price_output = 0.30
 
-[openai.coder]                       # a new preset
+[openai.standard]                    # cloud tiers, on api.openai.com
+model = "gpt-6.1-sol"
+
+[openai.thorough]
+model = "gpt-6-astra"
+
+[openai.coder]                       # an extra preset
 model = "qwen3-coder"
 base_url = "http://vllm.internal:8001/v1"
 ```
@@ -190,8 +198,10 @@ from omniharness import Agent, load_profiles
 agent = Agent(provider="openai", preset="quick", profiles=load_profiles("my-profiles.toml"))
 ```
 
-- **Fields:** `model`, `max_turns`, `description` and `effort`, plus the
-  preset's endpoint. For `openai` that's `base_url`, `api_key_env`, `organization`,
+- **Default profile:** without `--profile` / `--provider`, it's `claude`; if
+  the file has no `claude` profile, it's the file's first profile.
+- **Fields:** `model` (required), `max_turns`, `description` and `effort`,
+  plus the preset's endpoint. For `openai` that's `base_url`, `api_key_env`, `organization`,
   `price_input` and `price_output`; for `claude`, `base_url` only. Anything
   else is rejected, as is a literal `api_key`.
 - **Keys:** a preset with its own `base_url` never gets `OPENAI_API_KEY`, so
@@ -203,9 +213,10 @@ agent = Agent(provider="openai", preset="quick", profiles=load_profiles("my-prof
 - **With `model="auto"`,** the endpoint follows the routed preset: a task
   routed to `quick` goes to the hosted model, one routed to `standard` goes to
   OpenAI.
-- **Python:** `load_profiles(path)` returns the merged table;
-  `load_profiles(path, base={})` uses the file alone. `Agent(profiles=...)` takes
-  a whole table.
+- **Python:** `load_profiles(path)` returns the file's profiles;
+  `load_profiles(path, base=DEFAULT_PROFILES)` merges the file over the
+  built-in profiles field by field instead, to keep them and change a few
+  fields. `Agent(profiles=...)` takes a whole table.
 - **Responses or Chat Completions:** the openai provider speaks both
   `/v1/responses` and `/v1/chat/completions`. With the default `api = "auto"`,
   it tries Responses first; if a server answers 404, 405 or 501, that endpoint

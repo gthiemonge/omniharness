@@ -42,7 +42,7 @@ class AgentOptions:
 
         g = parser.add_argument_group(title)
         g.add_argument("--profiles", metavar="FILE",
-                       help="TOML or JSON file of profiles, merged over the built-in ones; "
+                       help="TOML or JSON file of profiles, replacing the built-in ones; "
                             "a preset can set its own base_url, api_key_env, ... "
                             "(env AGENT_PROFILES).")
         g.add_argument("--base-url", help="Custom API endpoint for the provider (env "
@@ -108,7 +108,7 @@ class AgentOptions:
                        help=f"With model auto: preset{who} when d1 is unavailable.")
 
     def profiles(self, args: argparse.Namespace) -> dict:
-        """The profiles table (--profiles merged over the built-in ones), loaded once."""
+        """The profiles table (--profiles, else the built-in ones), loaded once."""
         if self._profiles is None:
             self._profiles = load_profiles(args.profiles) if args.profiles else get_profiles()
         return self._profiles

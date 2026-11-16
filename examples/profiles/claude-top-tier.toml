@@ -3,9 +3,19 @@
 #   omniharness --profiles examples/profiles/claude-top-tier.toml --preset thorough "..."
 #   omniharness --profiles examples/profiles/claude-top-tier.toml --preset max "..."
 #
+# The file replaces the built-in profiles: there is no "openai" profile here.
 # Claude Fable 5.2 costs $8 / $40 per 1M tokens, twice Opus 5.5.
 # "max" is an extra preset you pick by hand; --model auto routing only uses
 # quick / standard / thorough.
+
+[claude.quick]
+model = "claude-haiku-5-5"
+max_turns = 30
+description = "Claude Haiku 5.5"
+
+[claude.standard]
+model = "claude-sonnet-5-5"
+description = "Claude Sonnet 5.5"
 
 [claude.thorough]
 model = "claude-fable-5-2"
