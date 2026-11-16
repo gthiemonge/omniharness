@@ -100,7 +100,9 @@ class RunResult:
     # The model's final answer (last assistant message).
     final_text: str = ""
     usage: Usage = field(default_factory=Usage)
-    # Per-model breakdown, as reported by the provider (Claude SDK only).
+    # Per-model breakdown: {model: {"inputTokens", "cacheReadInputTokens",
+    # "cacheCreationInputTokens", "outputTokens", "costUSD", ...}} (the Claude
+    # SDK's shape; costUSD None when unknown). See model_breakdown().
     model_usage: dict[str, Any] | None = None
     # Total cost in USD, when reported by the provider or computable.
     total_cost_usd: float | None = None
@@ -136,3 +138,38 @@ class RunResult:
         """Cost of this run plus all subagent runs; None if any cost is unknown."""
         costs = [run.total_cost_usd for run in self.all_runs()]
         return None if None in costs else sum(costs)
+
+    def model_breakdown(self, include_subagents: bool = True) -> dict[str, dict[str, Any]]:
+        """Tokens and cost per model, summed over this run (and its subagents).
+
+        Each entry: inputTokens (uncached), cacheReadInputTokens,
+        cacheCreationInputTokens, outputTokens, reasoningTokens, costUSD (None
+        when any part is unknown) and runs (how many runs used the model).
+        """
+        totals: dict[str, dict[str, Any]] = {}
+        for run in self.all_runs() if include_subagents else [self]:
+            per_model = run.model_usage or {run.model or "?": _usage_entry(run)}
+            for model, stats in per_model.items():
+                if not isinstance(stats, dict):
+                    continue
+                entry = totals.setdefault(model, {
+                    "inputTokens": 0, "cacheReadInputTokens": 0,
+                    "cacheCreationInputTokens": 0, "outputTokens": 0,
+                    "reasoningTokens": 0, "costUSD": 0.0, "runs": 0})
+                for key in ("inputTokens", "cacheReadInputTokens",
+                            "cacheCreationInputTokens", "outputTokens", "reasoningTokens"):
+                    entry[key] += stats.get(key) or 0
+                cost = stats.get("costUSD")
+                entry["costUSD"] = (None if cost is None or entry["costUSD"] is None
+                                    else entry["costUSD"] + cost)
+                entry["runs"] += 1
+        return totals
+
+
+def _usage_entry(run: "RunResult") -> dict[str, Any]:
+    """A model_usage entry from a run's totals (providers without a breakdown)."""
+    u = run.usage
+    return {"inputTokens": u.input_tokens, "cacheReadInputTokens": u.cache_read_input_tokens,
+            "cacheCreationInputTokens": u.cache_creation_input_tokens,
+            "outputTokens": u.output_tokens, "reasoningTokens": u.reasoning_tokens,
+            "costUSD": run.total_cost_usd}

@@ -161,21 +161,25 @@ def format_summary(result: RunResult) -> str:
         out.append(line)
         out.append(f"  Total:  {u.total_tokens:,} tokens")
 
-    if result.model_usage:
+    breakdown = result.model_breakdown()
+    if any(s["inputTokens"] or s["outputTokens"] for s in breakdown.values()):
         out.append("")
-        out.append("Per-model breakdown:")
-        for model_name, stats in result.model_usage.items():
-            if not isinstance(stats, dict):
-                out.append(f"  {model_name}: {stats}")
-                continue
-            out.append(f"  {model_name}:")
+        out.append("Per-model breakdown" + (" (incl. subagents):" if result.subagents
+                                            else ":"))
+        for model_name, stats in breakdown.items():
+            runs = f", {stats['runs']} runs" if stats["runs"] > 1 else ""
+            out.append(f"  {model_name}{runs}:")
             out.append(
-                f"    Input:  {stats.get('inputTokens', 0):,} new / "
-                f"{stats.get('cacheReadInputTokens', 0):,} cache read / "
-                f"{stats.get('cacheCreationInputTokens', 0):,} cache created"
+                f"    Input:  {stats['inputTokens']:,} new / "
+                f"{stats['cacheReadInputTokens']:,} cache read / "
+                f"{stats['cacheCreationInputTokens']:,} cache created"
             )
-            out.append(f"    Output: {stats.get('outputTokens', 0):,} tokens")
-            out.append(f"    Cost:   ${stats.get('costUSD', 0):.4f}")
+            line = f"    Output: {stats['outputTokens']:,} tokens"
+            if stats["reasoningTokens"]:
+                line += f" ({stats['reasoningTokens']:,} reasoning)"
+            out.append(line)
+            cost = stats["costUSD"]
+            out.append("    Cost:   " + ("unknown" if cost is None else f"${cost:.4f}"))
 
     if result.total_cost_usd is not None:
         out.append("")
@@ -184,14 +188,6 @@ def format_summary(result: RunResult) -> str:
     if result.subagents:
         out.append("")
         out.append(f"Subagents: {len(result.all_runs()) - 1} run(s)")
-        by_model: dict[str, list[RunResult]] = {}
-        for run in result.all_runs()[1:]:
-            by_model.setdefault(run.model, []).append(run)
-        for model, runs in by_model.items():
-            tokens = sum(r.usage.total_tokens for r in runs)
-            costs = [r.total_cost_usd for r in runs]
-            cost = "unknown" if None in costs else f"${sum(costs):.4f}"
-            out.append(f"  {model}: {len(runs)} run(s), {tokens:,} tokens, {cost}")
         cumulative = result.cumulative_cost_usd
         out.append(f"  Total tokens incl. subagents: {result.cumulative_usage.total_tokens:,}")
         if cumulative is not None:

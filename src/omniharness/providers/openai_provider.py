@@ -294,6 +294,15 @@ class OpenAIProvider(Provider):
                     f"Cost: unknown — no pricing for model '{request.model}' "
                     "(see omniharness.pricing.register_pricing)."
                 )
+        # One model per run here; same shape as the Claude SDK's breakdown.
+        result.model_usage = {request.model: {
+            "inputTokens": usage.input_tokens,
+            "cacheReadInputTokens": usage.cache_read_input_tokens,
+            "cacheCreationInputTokens": usage.cache_creation_input_tokens,
+            "outputTokens": usage.output_tokens,
+            "reasoningTokens": usage.reasoning_tokens,
+            "costUSD": result.total_cost_usd,
+        }}
         return result
 
     def _params(self, request: RunRequest, registry: ToolRegistry, history: "_History",
