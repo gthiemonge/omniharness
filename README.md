@@ -1,7 +1,7 @@
 # omniharness
 
-A small, provider-agnostic harness for tool-using AI agents, extracted from
-[openstack-review](https://github.com/gthiemonge/openstack-review-claude-skill).
+A small, provider-agnostic harness for tool-using AI agents, with an
+auto-classifier that picks the right model for each task.
 
 You write the agent once: a system prompt, some tools, and a working directory.
 The harness runs it on either backend:
@@ -13,6 +13,14 @@ The harness runs it on either backend:
 
 Both providers return the same `RunResult`: success, final text, normalized
 token usage, and cost.
+
+**Auto-classifier.** With `model="auto"`, a small local decision model
+([d1-2B](https://huggingface.co/LiquidAI/d1-2B), served by llama-server)
+classifies each task as fast, capable or expert work, and the agent runs it on
+the matching tier: a lookup goes to a cheap model, a design question to the
+strongest one. The choice is made per run and per subagent task, and tiers can
+mix providers and local models. See
+[Automatic model selection](#automatic-model-selection).
 
 ## Install
 
@@ -78,7 +86,7 @@ All examples run as-is. Switch provider with `AGENT_PROVIDER=openai`.
 | [`01_hello.py`](examples/01_hello.py) | Smallest agent: no tools, one question |
 | [`02_code_explorer.py`](examples/02_code_explorer.py) | Read-only Q&A over a local repo (`Read`/`Grep`/`Glob`) |
 | [`03_custom_tools.py`](examples/03_custom_tools.py) | `@tool` functions (sync, typed, with `Literal`), `ToolContext` injection |
-| [`04_skill_runner.py`](examples/04_skill_runner.py) + [`skills/changelog`](examples/skills/changelog/SKILL.md) | Running a Claude-style `SKILL.md` with helper scripts on any provider (the openstack-review pattern) |
+| [`04_skill_runner.py`](examples/04_skill_runner.py) + [`skills/changelog`](examples/skills/changelog/SKILL.md) | Running a Claude-style `SKILL.md` with helper scripts on any provider |
 | [`05_structured_output.py`](examples/05_structured_output.py) | Reliable structured output through a `submit_result` tool, plus a custom JSONL `Reporter` |
 | [`06_subagents.py`](examples/06_subagents.py) | Mid-tier orchestrator delegating to low-tier `explorer` / `runner` subagents in parallel |
 | [`07_auto_model.py`](examples/07_auto_model.py) | `model="auto"`: a local decision model (d1-2B) picks the model per run; `--rate-only` to check routing |
@@ -96,7 +104,7 @@ python examples/07_auto_model.py --rate-only
 For each setting, an explicit argument wins over the environment, which wins
 over the default. Every environment variable the harness reads has an argument
 and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
-`ps` and in shell history. The `AGENT_*` names match openstack-review's.
+`ps` and in shell history.
 
 | Setting | Argument | CLI | Environment | Default |
 |---------|----------|-----|-------------|---------|
@@ -544,51 +552,6 @@ class MyProvider(Provider):
 register_provider("mine", lambda **kw: MyProvider(**kw))
 Agent(provider="mine", model="my-model")
 ```
-
-## Migrating openstack-review
-
-The `providers/` package, `print_usage_summary` and the OpenAI pricing logic
-map to this library. `run_review()` in `review_agent.py` becomes:
-
-```python
-from omniharness import ALL_TOOLS, Agent, register_pricing, resolve_model
-from .review_config import OPENAI_PRICING, PRESETS
-
-for name, rates in OPENAI_PRICING.items():
-    register_pricing(name, **rates)
-
-cfg = resolve_model(provider, preset, model_override, profiles=PRESETS)
-print(f"Using {cfg.provider} / {cfg.model} (from {cfg.source})")
-provider_options = {}
-if cfg.provider == "openai":
-    provider_options = {"base_url": openai_base_url,
-                        "price_input": openai_price_input,
-                        "price_output": openai_price_output}
-
-agent = Agent(
-    provider=cfg.provider, model=cfg.model,
-    max_turns=max_turns_override or cfg.max_turns,
-    system_prompt=build_system_prompt(review_number, output_dir, gerrit_host),
-    tools=ALL_TOOLS,
-    work_dir=work_dir,
-    add_dirs=[output_dir, str(SKILL_DIR)],
-    env={"SKILL_DIR": str(SKILL_DIR)},
-    effort=effort_override,
-    provider_options=provider_options,
-)
-result = await agent.run(prompt)
-if report_path.exists():
-    print(f"Report saved to: {report_path}")
-```
-
-Behavior changes compared with the original code:
-
-- On `claude`, the harness also sets `ClaudeAgentOptions.tools` to the
-  requested built-ins. The original only set `allowed_tools`, which
-  auto-approved those tools without restricting the rest.
-- The `openai` provider uses `AsyncOpenAI`, so it no longer blocks the event
-  loop, and it reports cached and reasoning tokens.
-- `RunResult.usage` is a `Usage` dataclass instead of the SDK's raw dict.
 
 ## Development
 
