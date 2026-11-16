@@ -81,7 +81,7 @@ AUTO = "auto"
 ENDPOINT_FIELDS: dict[str, set[str]] = {
     "claude": {"base_url"},
     "openai": {"base_url", "api_key_env", "organization", "price_input", "price_output",
-               "api"},
+               "api", "context_window"},
 }
 PRESET_FIELDS = {"provider", "model", "max_turns", "description", "effort"}
 

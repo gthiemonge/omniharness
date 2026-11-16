@@ -6,7 +6,8 @@
 #
 # Fields: model, max_turns, description, effort, and the endpoint of that preset:
 #   openai: base_url, api_key_env, organization, price_input, price_output,
-#           api ("auto" | "responses" | "chat": the wire format, default auto)
+#           api ("auto" | "responses" | "chat": the wire format, default auto),
+#           context_window (tokens: trim requests to fit; default: no trimming)
 #   claude: base_url
 # A preset with its own base_url never gets OPENAI_API_KEY: name the variable
 # holding its key with api_key_env, or it sends the placeholder "EMPTY".

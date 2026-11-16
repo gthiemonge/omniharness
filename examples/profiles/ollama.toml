@@ -5,10 +5,13 @@
 #
 # api = "chat": Ollama's OpenAI-compatible API is /v1/chat/completions (newer
 # versions may also offer /v1/responses; api = "auto" would probe for it).
+# Ollama's default context is only a few thousand tokens: start it with a
+# bigger one, e.g. OLLAMA_CONTEXT_LENGTH=32768 ollama serve, and keep
+# context_window equal to it so the harness trims requests to fit.
 # Ollama needs no key; without api_key_env the harness sends "EMPTY", never
 # your OPENAI_API_KEY.
 
 [profiles.ollama]
-quick = { provider = "openai", model = "qwen3:8b", base_url = "http://localhost:11434/v1", api = "chat", price_input = 0, price_output = 0, description = "Qwen3 8B on Ollama" }
-standard = { provider = "openai", model = "qwen3:32b", base_url = "http://localhost:11434/v1", api = "chat", price_input = 0, price_output = 0, description = "Qwen3 32B on Ollama" }
-thorough = { provider = "openai", model = "qwen3:32b", base_url = "http://localhost:11434/v1", api = "chat", price_input = 0, price_output = 0, description = "Qwen3 32B on Ollama" }
+quick = { provider = "openai", model = "qwen3:8b", base_url = "http://localhost:11434/v1", context_window = 32768, api = "chat", price_input = 0, price_output = 0, description = "Qwen3 8B on Ollama" }
+standard = { provider = "openai", model = "qwen3:32b", base_url = "http://localhost:11434/v1", context_window = 32768, api = "chat", price_input = 0, price_output = 0, description = "Qwen3 32B on Ollama" }
+thorough = { provider = "openai", model = "qwen3:32b", base_url = "http://localhost:11434/v1", context_window = 32768, api = "chat", price_input = 0, price_output = 0, description = "Qwen3 32B on Ollama" }

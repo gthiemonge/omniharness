@@ -23,7 +23,8 @@ import asyncio
 import json
 import logging
 import os
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from typing import Any
 
 from .. import pricing
@@ -39,6 +40,12 @@ log = logging.getLogger("omniharness.openai")
 _COST_HEADERS = ("x-litellm-response-cost", "x-response-cost", "x-cost-usd")
 
 API_MODES = ("auto", "responses", "chat")
+# Context window trimming: the last turns keep their tool outputs whole; older
+# ones keep this many characters.
+_KEEP_RECENT = 2
+_ELIDED_HEAD = 500
+# How servers say a request is too long (llama.cpp, vLLM, OpenAI, ...).
+_CONTEXT_ERROR = re.compile(r"context|too long|maximum.*length|too many tokens", re.IGNORECASE)
 # HTTP statuses meaning "this server has no /v1/responses".
 _NO_RESPONSES_API = (404, 405, 501)
 
@@ -60,6 +67,56 @@ class _Turn:
     usage: tuple[int, int, int, int]
 
 
+@dataclass
+class _History:
+    """The conversation: the initial items, then one list of items per turn."""
+
+    prefix: list[dict[str, Any]]
+    turns: list[list[dict[str, Any]]] = field(default_factory=list)
+    capped: int = 0
+    elided: int = 0
+    dropped: int = 0
+
+    def items(self) -> list[dict[str, Any]]:
+        items = list(self.prefix)
+        if self.dropped:
+            items.append({"role": "user", "content": (
+                f"[{self.dropped} earlier step(s) of this task, with their tool calls and "
+                "results, were removed to fit the context window.]")})
+        for turn in self.turns:
+            items.extend({k: v for k, v in item.items() if k != "_elided"} for item in turn)
+        return items
+
+
+class _Window:
+    """A context window in tokens, with a token estimate calibrated by the server."""
+
+    def __init__(self, tokens: int):
+        self.tokens = tokens
+        # Characters of request JSON per token; refined from each response's usage.
+        self.chars_per_token = 3.5
+
+    def budget(self) -> int:
+        """Tokens the request may use: the window minus room for the reply."""
+        reserve = min(self.tokens // 4, 8192)
+        return int((self.tokens - reserve) * 0.95)
+
+    def fits(self, params: dict[str, Any]) -> bool:
+        return _size(params) / self.chars_per_token <= self.budget()
+
+    def tool_output_chars(self) -> int:
+        """The cap for one tool output: a quarter of the budget."""
+        return max(1000, int(self.budget() * self.chars_per_token / 4))
+
+    def calibrate(self, request_chars: int, input_tokens: int) -> None:
+        if input_tokens > 0:
+            self.chars_per_token = min(8.0, max(1.5, request_chars / input_tokens))
+
+
+def _size(params: dict[str, Any]) -> int:
+    return len(json.dumps(params, default=str))
+
+
 class OpenAIProvider(Provider):
     name = "openai"
 
@@ -73,6 +130,7 @@ class OpenAIProvider(Provider):
         options: dict[str, Any] | None = None,
         organization: str | None = None,
         api: str = "auto",
+        context_window: int | None = None,
     ):
         """
         Args:
@@ -87,6 +145,9 @@ class OpenAIProvider(Provider):
             organization: OpenAI organization id. Defaults to OPENAI_ORG.
             api: "responses", "chat" (Chat Completions), or "auto": Responses,
                 falling back to Chat Completions when the server lacks it.
+            context_window: The model's context size in tokens. When set, tool
+                outputs are capped and older history is shortened, then
+                dropped, so requests fit. None: no trimming.
         """
         if api not in API_MODES:
             raise ValueError(f"api must be one of {', '.join(API_MODES)}, not '{api}'")
@@ -98,6 +159,7 @@ class OpenAIProvider(Provider):
         self.options = options or {}
         self.organization = organization or os.getenv("OPENAI_ORG") or None
         self.api = api
+        self.context_window = int(context_window) if context_window else None
         # What "auto" settled on for this endpoint, once known.
         self._detected_api: str | None = None
 
@@ -123,7 +185,10 @@ class OpenAIProvider(Provider):
     async def run(self, request: RunRequest, reporter: Reporter) -> RunResult:
         client = self.client or self._make_client()
         registry = ToolRegistry(request.tools)
+        window = _Window(self.context_window) if self.context_window else None
         ctx = ToolContext(work_dir=request.work_dir, env=dict(request.env))
+        if window:
+            ctx.max_output_chars = min(ctx.max_output_chars, window.tool_output_chars())
 
         result = RunResult(success=False, provider=self.name, model=request.model)
         usage = Usage()
@@ -135,26 +200,33 @@ class OpenAIProvider(Provider):
         dialect = _DIALECTS[api]
         # The full conversation is kept client-side and resent every turn:
         # server-side state (previous_response_id) is OpenAI-specific.
-        history = dialect.start(request)
+        history = _History(dialect.start(request))
 
         for turn in range(1, request.max_turns + 1):
+            params = self._fit(request, registry, history, dialect, window)
             try:
-                raw = await dialect.create(client, self._params(request, registry, history,
-                                                                 dialect))
-            except Exception as e:  # only switched on, else re-raised
-                if not (self.api == "auto" and api == "responses" and turn == 1
-                        and getattr(e, "status_code", None) in _NO_RESPONSES_API):
+                raw = await dialect.create(client, params)
+            except Exception as e:  # only handled below, else re-raised
+                status = getattr(e, "status_code", None)
+                if (self.api == "auto" and api == "responses" and turn == 1
+                        and status in _NO_RESPONSES_API):
+                    api, dialect = "chat", _DIALECTS["chat"]
+                    self._detected_api = "chat"
+                    where = self.base_url or "the endpoint"
+                    log.info("%s has no /v1/responses (%s): using /v1/chat/completions",
+                             where, status)
+                    result.notes.append(f"{where} has no /v1/responses: used "
+                                        "/v1/chat/completions.")
+                    history = _History(dialect.start(request))
+                    params = self._fit(request, registry, history, dialect, window)
+                elif window and status == 400 and _CONTEXT_ERROR.search(str(e)):
+                    # The estimate was off: trim harder and try once more.
+                    log.info("context window exceeded (%s): trimming harder", e)
+                    params = self._fit(request, registry, history, dialect, window,
+                                       force=True)
+                else:
                     raise
-                api, dialect = "chat", _DIALECTS["chat"]
-                self._detected_api = "chat"
-                where = self.base_url or "the endpoint"
-                log.info("%s has no /v1/responses (%s): using /v1/chat/completions",
-                         where, e.status_code)
-                result.notes.append(f"{where} has no /v1/responses: used "
-                                    "/v1/chat/completions.")
-                history = dialect.start(request)
-                raw = await dialect.create(client, self._params(request, registry, history,
-                                                                 dialect))
+                raw = await dialect.create(client, params)
             if self.api == "auto":
                 self._detected_api = api
             response = raw.parse()
@@ -167,19 +239,23 @@ class OpenAIProvider(Provider):
 
             out = dialect.read(response, turn)
             _add_usage(usage, out.usage)
+            if window:
+                window.calibrate(_size(params), out.usage[0])
             for text in out.texts:
                 result.final_text = text
                 reporter.on_text(text)
-            dialect.record_assistant(history, out)
+            items: list[dict[str, Any]] = []
+            dialect.record_assistant(items, out)
 
             if not out.calls:
+                history.turns.append(items)
                 result.success = True
                 result.subtype = "success"
                 break
 
             # Run this turn's calls concurrently (e.g. a fan-out to several
             # subagents); outputs go back in call order.
-            async def execute(call: _ToolCall) -> str:
+            async def execute(call: _ToolCall, history: _History = history) -> str:
                 try:
                     args = json.loads(call.arguments or "{}")
                 except json.JSONDecodeError:
@@ -187,13 +263,25 @@ class OpenAIProvider(Provider):
                 reporter.on_tool_call(call.name, args)
                 output = await registry.dispatch(call.name, args, ctx)
                 reporter.on_tool_result(call.name, output, output.startswith("Error"))
+                # Custom tools don't know the cap the built-in ones follow.
+                if window and len(output) > ctx.max_output_chars:
+                    history.capped += 1
+                    cut = len(output) - ctx.max_output_chars
+                    output = (output[:ctx.max_output_chars]
+                              + f"\n... [truncated to fit the context window, {cut} more chars]")
                 return output
 
             outputs = await asyncio.gather(*(execute(call) for call in out.calls))
-            dialect.record_results(history, out.calls, outputs)
+            dialect.record_results(items, out.calls, outputs)
+            history.turns.append(items)
         else:
             result.subtype = "error_max_turns"
 
+        if history.capped or history.elided or history.dropped:
+            result.notes.append(
+                f"Trimmed to fit the {self.context_window:,}-token context window: "
+                f"{history.capped} tool output(s) capped, {history.elided} older one(s) "
+                f"shortened, {history.dropped} turn(s) removed.")
         result.usage = usage
         if api_cost_seen:
             result.total_cost_usd = api_cost
@@ -208,10 +296,42 @@ class OpenAIProvider(Provider):
                 )
         return result
 
-    def _params(self, request: RunRequest, registry: ToolRegistry, history: list,
+    def _params(self, request: RunRequest, registry: ToolRegistry, history: "_History",
                 dialect: "_Dialect") -> dict[str, Any]:
-        params = dialect.params(request, history, registry)
+        params = dialect.params(request, history.items(), registry)
         params.update(self.options)
+        return params
+
+    def _fit(self, request: RunRequest, registry: ToolRegistry, history: "_History",
+             dialect: "_Dialect", window: "_Window | None", force: bool = False
+             ) -> dict[str, Any]:
+        """The request params, after trimming the history to the context window.
+
+        In order, until it fits: shorten the tool outputs of older turns (the
+        last KEEP_RECENT stay whole), then drop the oldest turns whole (a tool
+        call never loses its result). force: the server said it doesn't fit,
+        whatever the estimate; shorten all but the last turn and drop half.
+        """
+        params = self._params(request, registry, history, dialect)
+        if window is None or (not force and window.fits(params)):
+            return params
+        keep = 1 if force else _KEEP_RECENT
+        for turn in history.turns[:max(len(history.turns) - keep, 0)]:
+            for i, item in enumerate(turn):
+                key = dialect.output_key(item)
+                if key and not item.get("_elided") and len(item[key]) > _ELIDED_HEAD:
+                    turn[i] = {**item, key: (
+                        item[key][:_ELIDED_HEAD] + f"\n... [{len(item[key]) - _ELIDED_HEAD} "
+                        "chars removed to fit the context window]"), "_elided": True}
+                    history.elided += 1
+            params = self._params(request, registry, history, dialect)
+            if not force and window.fits(params):
+                return params
+        target = len(history.turns) // 2 if force else 1
+        while len(history.turns) > target and (force or not window.fits(params)):
+            history.turns.pop(0)
+            history.dropped += 1
+            params = self._params(request, registry, history, dialect)
         return params
 
     def _resolve_rates(self, model: str) -> dict[str, float] | None:
@@ -241,6 +361,10 @@ class _Dialect:
         raise NotImplementedError
 
     def record_results(self, history: list, calls: list[_ToolCall], outputs: list[str]) -> None:
+        raise NotImplementedError
+
+    def output_key(self, item: dict[str, Any]) -> str | None:
+        """The key holding a tool output in this history item, if it is one."""
         raise NotImplementedError
 
 
@@ -293,6 +417,9 @@ class _Responses(_Dialect):
     def record_results(self, history, calls, outputs):
         history.extend({"type": "function_call_output", "call_id": c.id, "output": o}
                        for c, o in zip(calls, outputs, strict=True))
+
+    def output_key(self, item):
+        return "output" if item.get("type") == "function_call_output" else None
 
 
 class _Chat(_Dialect):
@@ -353,6 +480,9 @@ class _Chat(_Dialect):
     def record_results(self, history, calls, outputs):
         history.extend({"role": "tool", "tool_call_id": c.id, "content": o}
                        for c, o in zip(calls, outputs, strict=True))
+
+    def output_key(self, item):
+        return "content" if item.get("role") == "tool" else None
 
 
 _DIALECTS: dict[str, _Dialect] = {"responses": _Responses(), "chat": _Chat()}

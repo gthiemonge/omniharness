@@ -108,6 +108,7 @@ and a CLI flag, except `OPENAI_API_KEY`: a key on the command line would show in
 | endpoint (claude) | `provider_options={"base_url": ...}` | `--base-url` | `ANTHROPIC_BASE_URL` | Anthropic API |
 | endpoint (openai) | `provider_options={"base_url": ...}` | `--base-url` | `OPENAI_BASE_URL` | api.openai.com |
 | OpenAI organization | `provider_options={"organization": ...}` | `--openai-org` | `OPENAI_ORG` | none |
+| context window (openai) | `provider_options={"context_window": N}`, preset `context_window` | `--context-window` | none | no trimming |
 | OpenAI prices (USD / 1M tokens) | `provider_options={"price_input": ..., "price_output": ...}` | `--openai-price-input/-output` | `OPENAI_PRICE_INPUT/OUTPUT` | `pricing.PRICING` table |
 | OpenAI API key | `provider_options={"api_key": ...}` | none | `OPENAI_API_KEY` | required |
 | profiles file | `profiles=load_profiles(path)` | `--profiles` | `AGENT_PROFILES` | built-in profiles |
@@ -230,6 +231,36 @@ AGENT_PROFILES=my-profiles.toml AGENT_PROFILE=offline python examples/06_subagen
 - **File syntax:** `[profiles.<name>.<preset>]` or inline tables, as above;
   each new preset must set `provider`. `[openai.<preset>]` is shorthand for a
   preset of the `openai` profile on the `openai` provider.
+
+### Context windows
+
+Local models often have a small context window (8K to 32K tokens), and an agent
+fills it fast: every tool output stays in the conversation, which the openai
+provider resends each turn. Set the model's window with `context_window =
+32768` on a preset (or `--context-window`), and the provider keeps each request
+inside it, in steps:
+
+1. **Every tool output is capped** at a quarter of the budget (the window
+   minus room for the reply). Built-in tools cut their own output; custom
+   tools' outputs are cut by the provider.
+2. **Older tool outputs are shortened** to their first 500 characters, oldest
+   first, until the request fits; the last two turns stay whole.
+3. **The oldest turns are dropped whole** if that isn't enough: a tool call
+   always goes with its result, the task itself is never dropped, and a note
+   tells the model that earlier steps were removed.
+4. **If the server still says the request is too long,** the provider trims
+   harder and retries once.
+
+Token counts are estimated from the request's size, then calibrated on the
+token counts the server reports. Each run's `RunResult.notes` says what was
+trimmed. Without `context_window`, nothing is trimmed (OpenAI's own models have
+large windows). The Claude provider doesn't need it: the Claude Agent SDK
+manages its own context.
+
+Tested with llama.cpp's `llama-server -c 4096` and a tool returning a 26 KB
+file: without `context_window` the server rejected the request (15,274 tokens
+for a 4,096-token window); with it, the output was capped and the run
+succeeded.
 
 See [`examples/profiles/`](examples/profiles/) for sample files: offline with
 llama-server or Ollama, a vLLM cluster, hybrid local and cloud, a company
